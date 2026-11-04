@@ -15,12 +15,12 @@ export const BriefInputSchema = z.object({
 export type BriefInput = z.infer<typeof BriefInputSchema>;
 
 export const CandidateSchema = z.object({
-  id: z.string().min(1),
-  url: z.string().url(),
-  title: z.string().trim().min(1),
-  snippet: z.string().trim().min(1),
-  score: z.number().min(0).max(1).optional(),
-});
+  type: z.enum(["firm", "partner", "other"]),
+  name: z.string().trim().min(1),
+  officialDomain: z.string().trim().min(1),
+  descriptor: z.string().trim().min(1),
+  matchScore: z.number().min(0).max(1),
+}).strict();
 
 export type Candidate = z.infer<typeof CandidateSchema>;
 
