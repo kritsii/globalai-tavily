@@ -85,7 +85,7 @@ export const RunStatsSchema = z.object({
     output: z.number().int().nonnegative(),
     total: z.number().int().nonnegative(),
   }),
-  costEstimate: z.number().nonnegative(),
+  costEstimate: z.number().nonnegative().nullable(),
   latencyMs: z.number().nonnegative(),
   fallbacks: z.number().int().nonnegative(),
   cacheHits: z.number().int().nonnegative(),
