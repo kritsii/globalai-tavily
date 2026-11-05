@@ -81,7 +81,7 @@ export async function research(
     return left.url.localeCompare(right.url);
   });
 
-  const sources = orderedSources.map((source, index) => ({
+  const sources = orderedSources.slice(0, 12).map((source, index) => ({
     ...source,
     id: `S${index + 1}`,
   }));

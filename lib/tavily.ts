@@ -108,7 +108,7 @@ function normalizeResults(
       publishedAt,
       domain,
       sourceType: classifySource(domain, url),
-      snippet: result.content,
+      snippet: result.content.slice(0, 600),
     });
 
     if (parsed.success) sources.push(parsed.data);

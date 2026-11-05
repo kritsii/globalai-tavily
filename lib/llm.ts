@@ -177,9 +177,16 @@ export async function chatJson<T>(
   model: string,
   messages: ChatCompletionMessageParam[],
   schema: z.ZodType<T>,
-  { stats = createRunStats() }: ChatOptions = {},
+  {
+    stats = createRunStats(),
+    maxCompletionTokens,
+  }: ChatOptions = {},
 ): Promise<{ data: T; stats: RunStats }> {
-  const first = await chat(model, messages, { json: true, stats });
+  const first = await chat(model, messages, {
+    json: true,
+    stats,
+    maxCompletionTokens,
+  });
   const firstContent = first.completion.choices[0]?.message.content ?? null;
 
   try {
@@ -199,7 +206,11 @@ export async function chatJson<T>(
         }`,
       },
     ];
-    const retry = await chat(model, retryMessages, { json: true, stats });
+    const retry = await chat(model, retryMessages, {
+      json: true,
+      stats,
+      maxCompletionTokens,
+    });
     const retryContent = retry.completion.choices[0]?.message.content ?? null;
 
     return { data: parseAndValidateJson(retryContent, schema), stats };
