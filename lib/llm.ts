@@ -33,7 +33,7 @@ export function createRunStats(): RunStats {
     latencyMs: 0,
     fallbacks: 0,
     cacheHits: 0,
-    droppedClaims: 0,
+    droppedClaims: [],
   });
 }
 

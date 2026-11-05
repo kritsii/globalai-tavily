@@ -1,7 +1,20 @@
 import { search } from "@/lib/tavily";
-import { SearchPlanSchema, type SearchPlan } from "@/lib/pipeline/plan";
+import {
+  SearchPlanSchema,
+  SearchQueryCategorySchema,
+  type SearchPlan,
+  type SearchQueryCategory,
+} from "@/lib/pipeline/plan";
 import { SourceSchema, type Source, type SourceType } from "@/types";
 import { z } from "zod";
+
+export const ResearchResultSchema = z.object({
+  sources: z.array(SourceSchema),
+  stale: z.boolean(),
+  sourceIdsByCategory: z.record(SearchQueryCategorySchema, z.array(z.string())),
+});
+
+export type ResearchResult = z.infer<typeof ResearchResultSchema>;
 
 const SourcePriority: Record<SourceType, number> = {
   primary: 0,
@@ -41,6 +54,15 @@ export async function research(
   );
 
   const byUrl = new Map<string, Source>();
+  const urlsByCategory = new Map<SearchQueryCategory, Set<string>>();
+  validatedPlan.queries.forEach(({ category }, index) => {
+    const categoryUrls = urlsByCategory.get(category) ?? new Set<string>();
+    for (const source of results[index]) {
+      categoryUrls.add(normalizeUrl(source.url));
+    }
+    urlsByCategory.set(category, categoryUrls);
+  });
+
   for (const source of results.flat()) {
     const url = normalizeUrl(source.url);
     if (byUrl.has(url)) continue;
@@ -63,6 +85,15 @@ export async function research(
     ...source,
     id: `S${index + 1}`,
   }));
+  const idByUrl = new Map(sources.map((source) => [source.url, source.id]));
+  const sourceIdsByCategory = Object.fromEntries(
+    SearchQueryCategorySchema.options.map((category) => [
+      category,
+      [...(urlsByCategory.get(category) ?? [])]
+        .map((url) => idByUrl.get(url))
+        .filter((id): id is string => id !== undefined),
+    ]),
+  ) as Record<SearchQueryCategory, string[]>;
   const newestDate = sources.reduce<string | null>(
     (newest, source) =>
       source.publishedAt && (!newest || source.publishedAt > newest)
@@ -71,10 +102,11 @@ export async function research(
     null,
   );
 
-  return {
+  return ResearchResultSchema.parse({
     sources,
     stale:
       newestDate === null ||
       new Date(`${newestDate}T00:00:00.000Z`).getTime() < staleCutoff,
-  };
+    sourceIdsByCategory,
+  });
 }

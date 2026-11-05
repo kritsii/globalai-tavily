@@ -78,6 +78,13 @@ export const BriefSchema = z.object({
 
 export type Brief = z.infer<typeof BriefSchema>;
 
+export const DroppedClaimSchema = z.object({
+  text: z.string().trim().min(1),
+  reason: z.string().trim().min(1),
+});
+
+export type DroppedClaim = z.infer<typeof DroppedClaimSchema>;
+
 export const RunStatsSchema = z.object({
   models: z.array(z.string().min(1)),
   tokens: z.object({
@@ -89,7 +96,7 @@ export const RunStatsSchema = z.object({
   latencyMs: z.number().nonnegative(),
   fallbacks: z.number().int().nonnegative(),
   cacheHits: z.number().int().nonnegative(),
-  droppedClaims: z.number().int().nonnegative(),
+  droppedClaims: z.array(DroppedClaimSchema),
 });
 
 export type RunStats = z.infer<typeof RunStatsSchema>;
