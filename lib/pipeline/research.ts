@@ -46,7 +46,7 @@ function getStaleCutoff(meetingAt: string): number {
 export async function research(
   plan: SearchPlan,
   meetingAt: string,
-): Promise<{ sources: Source[]; stale: boolean }> {
+): Promise<ResearchResult> {
   const validatedPlan = SearchPlanSchema.parse(plan);
   const staleCutoff = getStaleCutoff(meetingAt);
   const results = await Promise.all(

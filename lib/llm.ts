@@ -9,6 +9,7 @@ import { RunStatsSchema, type RunStats } from "@/types";
 type ChatOptions = {
   json?: boolean;
   stats?: RunStats;
+  maxCompletionTokens?: number;
 };
 
 type ChatResult = {
@@ -67,24 +68,38 @@ async function requestCompletion(
   model: string,
   messages: ChatCompletionMessageParam[],
   json: boolean,
+  maxCompletionTokens?: number,
 ): Promise<ChatCompletion> {
+  const tokenLimit = maxCompletionTokens
+    ? { max_completion_tokens: maxCompletionTokens }
+    : {};
+
   try {
     return await client.chat.completions.create({
       model,
       messages,
+      ...tokenLimit,
       ...(json ? { response_format: { type: "json_object" } } : {}),
     });
   } catch (error) {
     if (!json || !isJsonModeUnsupported(error)) throw error;
 
-    return client.chat.completions.create({ model, messages });
+    return client.chat.completions.create({
+      model,
+      messages,
+      ...tokenLimit,
+    });
   }
 }
 
 export async function chat(
   model: string,
   messages: ChatCompletionMessageParam[],
-  { json = false, stats = createRunStats() }: ChatOptions = {},
+  {
+    json = false,
+    stats = createRunStats(),
+    maxCompletionTokens,
+  }: ChatOptions = {},
 ): Promise<ChatResult> {
   if (!model.trim()) throw new Error("model must not be empty.");
 
@@ -95,7 +110,13 @@ export async function chat(
 
   try {
     addModel(stats, model);
-    completion = await requestCompletion(client, model, messages, json);
+    completion = await requestCompletion(
+      client,
+      model,
+      messages,
+      json,
+      maxCompletionTokens,
+    );
   } catch (error) {
     if (!fallbackModel || fallbackModel === model) {
       stats.latencyMs += performance.now() - startedAt;
@@ -110,6 +131,7 @@ export async function chat(
         fallbackModel,
         messages,
         json,
+        maxCompletionTokens,
       );
     } catch (fallbackError) {
       stats.latencyMs += performance.now() - startedAt;

@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { chatJson } from "@/lib/llm";
-import { FactSchema, SourceSchema, type Fact, type Source } from "@/types";
+import {
+  FactSchema,
+  SourceSchema,
+  type Fact,
+  type RunStats,
+  type Source,
+} from "@/types";
 
 const ExtractedFactSchema = FactSchema.omit({ id: true });
 
@@ -8,7 +14,12 @@ const ExtractionResponseSchema = z.object({
   facts: z.array(ExtractedFactSchema),
 });
 
-export async function extractFacts(sources: Source[]): Promise<Fact[]> {
+const MAX_SNIPPET_LENGTH = 450;
+
+export async function extractFacts(
+  sources: Source[],
+  stats?: RunStats,
+): Promise<Fact[]> {
   const validatedSources = z.array(SourceSchema).parse(sources);
   if (validatedSources.length === 0) return [];
 
@@ -22,16 +33,20 @@ export async function extractFacts(sources: Source[]): Promise<Fact[]> {
       {
         role: "system",
         content:
-          "Extract concise, factual claims strictly from the provided source snippets. Use ONLY the snippets; do not use prior knowledge, infer unsupported details, or add facts. Each fact must cite one or more exact sourceIds from the input. If a snippet does not support a clear factual claim, omit it. Set date to a date explicitly stated in the snippet, otherwise null. Return valid JSON with a facts array.",
+          "Extract at most one concise factual claim per source, strictly from the provided snippets. Use ONLY those snippets; do not use prior knowledge, infer unsupported details, or add facts. Each fact must cite the exact sourceId that supports it. If a snippet does not support a clear fact, omit it. Set date to a date explicitly stated in the snippet, otherwise null. Return valid JSON with a facts array.",
       },
       {
         role: "user",
         content: JSON.stringify({
-          sources: validatedSources.map(({ id, snippet }) => ({ id, snippet })),
+          sources: validatedSources.map(({ id, snippet }) => ({
+            id,
+            snippet: snippet.slice(0, MAX_SNIPPET_LENGTH),
+          })),
         }),
       },
     ],
     ExtractionResponseSchema,
+    { stats, maxCompletionTokens: 800 },
   );
 
   return data.facts

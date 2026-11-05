@@ -173,6 +173,7 @@ export async function verifyBrief(
         },
       ],
       VerificationResponseSchema,
+      { stats, maxCompletionTokens: 1_200 },
     );
 
     const expectedIds = modelInputs.map(({ sentenceId }) => sentenceId);

@@ -5,6 +5,7 @@ import {
   CandidateSchema,
   type BriefInput,
   type Candidate,
+  type RunStats,
 } from "@/types";
 
 export const SearchQueryCategorySchema = z.enum([
@@ -45,6 +46,7 @@ export type SearchPlan = z.infer<typeof SearchPlanSchema>;
 export async function planSearchQueries(
   candidate: Candidate,
   briefInput: BriefInput,
+  stats?: RunStats,
 ): Promise<SearchPlan> {
   const selectedCandidate = CandidateSchema.parse(candidate);
   const input = BriefInputSchema.parse(briefInput);
@@ -57,7 +59,7 @@ export async function planSearchQueries(
       {
         role: "system",
         content:
-          "Create a JSON search plan with 6 to 10 distinct web search queries, each labeled with a category. Include at least one query for every category: firm_news, new_investments, partner_posts_interviews, portfolio_news, thesis_statements, and sector_competitors. Tailor queries to the selected investor and startup. Search for competitor companies in the startup's sector without asserting or inventing competitor names. Return concise, directly searchable queries.",
+          'Return valid JSON shaped as {"queries":[{"category":"firm_news","query":"..."}]}. Create 6 to 10 distinct, directly searchable queries and include every category exactly as spelled here: "firm_news", "new_investments", "partner_posts_interviews", "portfolio_news", "thesis_statements", "sector_competitors". Each query category must be exactly one of those six values; do not invent, rename, or abbreviate categories. Tailor queries to the selected investor and startup. For sector competitors, search for companies in the sector without asserting or inventing competitor names.',
       },
       {
         role: "user",
@@ -70,6 +72,7 @@ export async function planSearchQueries(
       },
     ],
     SearchPlanSchema,
+    { stats, maxCompletionTokens: 800 },
   );
 
   return data;
