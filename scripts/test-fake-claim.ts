@@ -49,11 +49,19 @@ async function main() {
       domain: "example.com",
       sourceType: "primary" as const,
       snippet: "Peak XV Partners is a venture capital firm.",
+      background: false,
     },
   ];
   const stats = createRunStats();
 
-  const cleaned = await verifyBrief(brief, facts, sources, stats);
+  const cleaned = await verifyBrief(
+    brief,
+    facts,
+    sources,
+    { officialDomain: "peakxv.com" },
+    "2026-11-07T00:00:00.000Z",
+    stats,
+  );
   const fakeClaimWasDropped = stats.droppedClaims.some(
     ({ text }) => text === fakeClaim,
   );

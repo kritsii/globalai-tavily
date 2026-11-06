@@ -143,6 +143,7 @@ export async function POST(request: Request) {
           send("progress", { stage, factCount: facts.length });
           const synthesized = await synthesizeBrief(
             facts,
+            researchResult.sources,
             runContext.briefInput,
             runContext.candidate,
             stats,
@@ -157,6 +158,8 @@ export async function POST(request: Request) {
             synthesized,
             facts,
             researchResult.sources,
+            runContext.candidate,
+            runContext.briefInput.meetingAt,
             stats,
           );
           if (cancelled) return;

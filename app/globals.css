@@ -1039,6 +1039,15 @@ button:disabled {
   font-size: 11px;
 }
 
+.background-badge {
+  border-radius: 999px;
+  padding: 1px 5px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent-strong);
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 11px;
+}
+
 .empty-section {
   margin: 0;
   color: var(--muted);

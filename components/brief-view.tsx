@@ -54,6 +54,7 @@ function CitedSentence({
     factIds: string[];
     verificationStatus?: "partial";
     date?: string;
+    backgroundDate?: string;
   };
   finalized: FinalizedBrief;
 }) {
@@ -63,6 +64,11 @@ function CitedSentence({
       <span>{entry.text}</span>
       {entry.verificationStatus === "partial" && (
         <span className="partial-badge">Partial</span>
+      )}
+      {entry.backgroundDate && (
+        <span className="background-badge">
+          Background · {entry.backgroundDate}
+        </span>
       )}
       <Citation factIds={entry.factIds} finalized={finalized} />
     </p>
@@ -81,6 +87,7 @@ function BriefSection({
     factIds: string[];
     verificationStatus?: "partial";
     date?: string;
+    backgroundDate?: string;
   }>;
   finalized: FinalizedBrief;
   emptyText?: string;
@@ -250,6 +257,7 @@ export default function BriefView({ candidateName, finalized, stats }: Props) {
                       <span>
                         {source.domain}
                         {source.publishedAt ? ` · ${source.publishedAt}` : ""}
+                        {source.background ? " · Background" : ""}
                       </span>
                     </span>
                     <ExternalIcon />

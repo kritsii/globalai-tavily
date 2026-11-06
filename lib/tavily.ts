@@ -1,5 +1,10 @@
 import { tavily } from "@tavily/core";
 import { SourceSchema, type Source, type SourceType } from "@/types";
+import {
+  getDateWindow,
+  isWithinDateRange,
+  matchesDomain,
+} from "@/lib/source-quality";
 
 type SearchOptions = {
   meetingAt: string;
@@ -58,30 +63,11 @@ function toUtcDate(value: string): string | undefined {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 
-function getWindow(meetingAt: string, windowDays: number) {
-  const meetingDate = toUtcDate(meetingAt);
-  if (!meetingDate) {
-    throw new Error("meetingAt must be a valid date.");
-  }
-  if (!Number.isInteger(windowDays) || windowDays < 0) {
-    throw new Error("windowDays must be a non-negative integer.");
-  }
-
-  const end = new Date(`${meetingDate}T00:00:00.000Z`);
-  const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - windowDays);
-
-  return {
-    startDate: start.toISOString().slice(0, 10),
-    endDate: meetingDate,
-  };
-}
-
 function normalizeResults(
   results: Awaited<ReturnType<ReturnType<typeof tavily>["search"]>>["results"],
   startDate: string,
   endDate: string,
-  filterByDate: boolean,
+  includeDomains: string[],
 ): Source[] {
   const seenUrls = new Set<string>();
   const sources: Source[] = [];
@@ -90,12 +76,7 @@ function normalizeResults(
     const publishedAt = result.publishedDate
       ? toUtcDate(result.publishedDate)
       : undefined;
-    if (
-      filterByDate &&
-      (!publishedAt || publishedAt < startDate || publishedAt > endDate)
-    ) {
-      continue;
-    }
+    if (!publishedAt || publishedAt > endDate) continue;
 
     let url: URL;
     try {
@@ -107,9 +88,14 @@ function normalizeResults(
     url.hash = "";
     const normalizedUrl = url.toString();
     if (seenUrls.has(normalizedUrl)) continue;
-    seenUrls.add(normalizedUrl);
 
     const domain = url.hostname.toLowerCase().replace(/^www\./, "");
+    const withinWindow = isWithinDateRange(publishedAt, startDate, endDate);
+    const lockedDomain = includeDomains.some((includedDomain) =>
+      matchesDomain(domain, includedDomain),
+    );
+    if (!withinWindow && !lockedDomain) continue;
+
     const parsed = SourceSchema.safeParse({
       id: result.id || normalizedUrl,
       url: normalizedUrl,
@@ -118,9 +104,13 @@ function normalizeResults(
       domain,
       sourceType: classifySource(domain, url),
       snippet: result.content.slice(0, 600),
+      background: !withinWindow && lockedDomain,
     });
 
-    if (parsed.success) sources.push(parsed.data);
+    if (parsed.success) {
+      seenUrls.add(normalizedUrl);
+      sources.push(parsed.data);
+    }
   }
 
   return sources;
@@ -135,7 +125,7 @@ export async function search(
     throw new Error("query must not be empty.");
   }
 
-  const { startDate, endDate } = getWindow(meetingAt, windowDays);
+  const { startDate, endDate } = getDateWindow(meetingAt, windowDays);
   const cacheKey = JSON.stringify([
     normalizedQuery,
     startDate,
@@ -172,7 +162,7 @@ export async function search(
     response.results,
     startDate,
     endDate,
-    filterByDate,
+    includeDomains ?? [],
   );
   cache.set(cacheKey, sources);
   return sources.map((source) => ({ ...source }));

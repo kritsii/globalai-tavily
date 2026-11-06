@@ -3,10 +3,12 @@ import { chatJson } from "@/lib/llm";
 import {
   BriefInputSchema,
   FactSchema,
+  SourceSchema,
   type BriefInput,
   type Candidate,
   type Fact,
   type RunStats,
+  type Source,
 } from "@/types";
 
 const CitedSentenceSchema = z.object({
@@ -57,17 +59,20 @@ export type SynthesisBrief = z.output<typeof SynthesisBriefSchema>;
 
 export async function synthesizeBrief(
   facts: Fact[],
+  sources: Source[],
   briefInput: BriefInput,
   candidate: Pick<Candidate, "name" | "officialDomain">,
   stats?: RunStats,
 ): Promise<SynthesisBrief> {
   const validatedFacts = z.array(FactSchema).parse(facts);
+  const validatedSources = z.array(SourceSchema).parse(sources);
   if (validatedFacts.length === 0) {
     throw new Error("Cannot synthesize a brief without verified facts.");
   }
 
   const input = BriefInputSchema.parse(briefInput);
   const factById = new Map(validatedFacts.map((fact) => [fact.id, fact]));
+  const sourceById = new Map(validatedSources.map((source) => [source.id, source]));
   const allowedFactIds = new Set(factById.keys());
   const BriefSchemaForFacts = SynthesisBriefSchema.superRefine((brief, context) => {
     const citedSentences = [
@@ -112,7 +117,7 @@ export async function synthesizeBrief(
       {
         role: "system",
         content:
-          `The subject is ${candidate.name} (${candidate.officialDomain}). Ignore any source about a different organization with a similar name. If sources are about another entity, return no facts. Return valid JSON for an investor brief using ONLY the provided facts. Do not use outside knowledge, add context, make assumptions, or infer unsupported claims. Every sentence must include one or more exact factIds that support it. The summary must contain exactly two sentences. Timeline entries must use dates exactly as stated on cited facts. Include recent investments only when directly evidenced by facts. Include thesisDrift only when facts show an evidence-backed change in thesis; otherwise return an empty array. Include portfolioConflicts only when facts directly support a comparison or conflict with the founder's startup; otherwise return an empty array. Provide exactly three conversation starters, each tied to at least one fact and explicitly relevant to the founder's startup. For any unsupported point, omit it rather than filling gaps.
+          `The subject is ${candidate.name} (${candidate.officialDomain}). Ignore any source about a different organization with a similar name. If sources are about another entity, return no facts. Return valid JSON for an investor brief using ONLY the provided facts. Do not use outside knowledge, add context, make assumptions, or infer unsupported claims. Every sentence must include one or more exact factIds that support it. The summary must contain exactly two sentences. Timeline entries must use dates exactly as stated on cited facts. Include recent investments only when directly evidenced by facts. Include thesisDrift only when facts show an evidence-backed change in thesis; otherwise return an empty array. Include portfolioConflicts only when facts directly support a comparison or conflict with the founder's startup; otherwise return an empty array. Provide exactly three conversation starters, each tied to at least one fact and explicitly relevant to the founder's startup. For any unsupported point, omit it rather than filling gaps. Facts from older official-domain sources are background only: use them solely in the summary as stable facts about the firm, standard deal terms, or focus, and explicitly label them as background with the source date. Never use background facts in the timeline, recent investments, thesis, portfolio fit, or conversation starters. Do not claim "last twelve months", "last 12 months", "this year", or similar period figures unless a cited source is dated within that period.
 
 Return sentence entries as objects, never strings. Example:
 {
@@ -129,7 +134,18 @@ Never output a bare string where an object is required. Every item must include 
         role: "user",
         content: JSON.stringify({
           startup: input.startup,
-          facts: validatedFacts,
+          facts: validatedFacts.map((fact) => ({
+            ...fact,
+            citedSources: fact.sourceIds
+              .map((sourceId) => sourceById.get(sourceId))
+              .filter((source): source is Source => source !== undefined)
+              .map(({ id, domain, publishedAt, background }) => ({
+                id,
+                domain,
+                publishedAt,
+                background,
+              })),
+          })),
         }),
       },
     ],

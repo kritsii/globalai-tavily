@@ -12,6 +12,12 @@ import {
   type Source,
   type SourceType,
 } from "@/types";
+import {
+  getDateWindow,
+  isBlocklistedDomain,
+  isWithinDateRange,
+  matchesDomain,
+} from "@/lib/source-quality";
 import { z } from "zod";
 
 export const ResearchResultSchema = z.object({
@@ -27,6 +33,7 @@ const SourcePriority: Record<SourceType, number> = {
   news: 1,
   aggregator: 2,
 };
+const MAX_BLOCKLISTED_SOURCES = 1;
 
 function normalizeUrl(value: string): string {
   const url = new URL(value);
@@ -65,12 +72,6 @@ function mentionsFirm(source: Source, firmName: string): boolean {
   );
 }
 
-function matchesOfficialDomain(sourceDomain: string, officialDomain: string): boolean {
-  const domain = sourceDomain.toLowerCase().replace(/^www\./, "");
-  const official = officialDomain.toLowerCase().replace(/^www\./, "");
-  return domain === official || domain.endsWith(`.${official}`);
-}
-
 export async function research(
   plan: SearchPlan,
   meetingAt: string,
@@ -79,6 +80,7 @@ export async function research(
   const validatedPlan = SearchPlanSchema.parse(plan);
   const selectedCandidate = CandidateSchema.parse(candidate);
   const staleCutoff = getStaleCutoff(meetingAt);
+  const dateWindow = getDateWindow(meetingAt);
   const results = await Promise.all(
     validatedPlan.queries.map(({ query, includeDomains }) =>
       search(query, { meetingAt, includeDomains }),
@@ -94,12 +96,33 @@ export async function research(
   }
 
   const mergedSources = [...byUrl.values()];
-  const relevantSources = mergedSources.filter(
+  const datedSources = mergedSources.flatMap((source) => {
+    if (!source.publishedAt || source.publishedAt > dateWindow.endDate) {
+      return [];
+    }
+    const withinWindow = isWithinDateRange(
+      source.publishedAt,
+      dateWindow.startDate,
+      dateWindow.endDate,
+    );
+    const officialDomain = matchesDomain(
+      source.domain,
+      selectedCandidate.officialDomain,
+    );
+    if (!withinWindow && !officialDomain) return [];
+    return [{ ...source, background: !withinWindow && officialDomain }];
+  });
+  const droppedByDateCount = mergedSources.length - datedSources.length;
+  console.info(
+    `Research date filter dropped ${droppedByDateCount} sources for ${selectedCandidate.name}.`,
+  );
+
+  const relevantSources = datedSources.filter(
     (source) =>
-      matchesOfficialDomain(source.domain, selectedCandidate.officialDomain) ||
+      matchesDomain(source.domain, selectedCandidate.officialDomain) ||
       mentionsFirm(source, selectedCandidate.name),
   );
-  const droppedSourceCount = mergedSources.length - relevantSources.length;
+  const droppedSourceCount = datedSources.length - relevantSources.length;
   console.info(
     `Research relevance filter dropped ${droppedSourceCount} sources for ${selectedCandidate.name}.`,
   );
@@ -116,6 +139,11 @@ export async function research(
   });
 
   const orderedSources = relevantSources.sort((left, right) => {
+    const blocklistOrder =
+      Number(isBlocklistedDomain(left.domain)) -
+      Number(isBlocklistedDomain(right.domain));
+    if (blocklistOrder !== 0) return blocklistOrder;
+
     const priority = SourcePriority[left.sourceType] - SourcePriority[right.sourceType];
     if (priority !== 0) return priority;
 
@@ -126,10 +154,19 @@ export async function research(
     return left.url.localeCompare(right.url);
   });
 
-  const sources = orderedSources.slice(0, 12).map((source, index) => ({
-    ...source,
-    id: `S${index + 1}`,
-  }));
+  let blocklistedCount = 0;
+  const sources = orderedSources
+    .filter((source) => {
+      if (!isBlocklistedDomain(source.domain)) return true;
+      if (blocklistedCount >= MAX_BLOCKLISTED_SOURCES) return false;
+      blocklistedCount += 1;
+      return true;
+    })
+    .slice(0, 12)
+    .map((source, index) => ({
+      ...source,
+      id: `S${index + 1}`,
+    }));
   const idByUrl = new Map(sources.map((source) => [source.url, source.id]));
   const sourceIdsByCategory = Object.fromEntries(
     SearchQueryCategorySchema.options.map((category) => [

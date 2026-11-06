@@ -20,6 +20,7 @@ const CitedSentenceSchema = z.object({
   text: z.string().min(1),
   factIds: z.array(z.string().min(1)),
   verificationStatus: z.literal("partial").optional(),
+  backgroundDate: z.string().optional(),
 });
 
 const ClientFinalizedBriefSchema = z.object({

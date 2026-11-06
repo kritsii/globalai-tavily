@@ -34,6 +34,7 @@ export const SourceSchema = z.object({
   domain: z.string().trim().min(1),
   sourceType: SourceTypeSchema,
   snippet: z.string().trim().min(1),
+  background: z.boolean().default(false),
 });
 
 export type Source = z.infer<typeof SourceSchema>;

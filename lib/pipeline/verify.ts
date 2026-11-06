@@ -1,7 +1,19 @@
 import { z } from "zod";
 import { chatJson, createRunStats } from "@/lib/llm";
-import type { RunStats } from "@/types";
-import { FactSchema, SourceSchema, type Fact, type Source } from "@/types";
+import type { Candidate, RunStats } from "@/types";
+import {
+  FactSchema,
+  SourceSchema,
+  type Fact,
+  type Source,
+} from "@/types";
+import {
+  getDateWindow,
+  getTwelveMonthCutoff,
+  isBlocklistedDomain,
+  isWithinDateRange,
+  matchesDomain,
+} from "@/lib/source-quality";
 import {
   SynthesisBriefSchema,
   type SynthesisBrief,
@@ -51,6 +63,7 @@ const CleanedSentenceSchema = z.object({
   text: z.string().trim().min(1),
   factIds: z.array(z.string().min(1)).min(1),
   verificationStatus: z.literal("partial").optional(),
+  backgroundDate: z.string().optional(),
 });
 
 const CleanedTimelineEntrySchema = CleanedSentenceSchema.extend({
@@ -76,6 +89,24 @@ type SentenceLocation = {
   factIds: string[];
   date?: string;
 };
+
+const rollingYearClaimPattern =
+  /\b(?:last|past|previous)\s+(?:12|twelve)\s+months?\b|\b(?:last|past)\s+year\b/i;
+const currentYearClaimPattern =
+  /\b(?:this|current)\s+(?:(?:calendar|fiscal)\s+)?year\b|\byear[- ]to[- ]date\b|\bYTD\b/i;
+
+function isBackgroundSource(
+  source: Source,
+  startDate: string,
+  officialDomain: string,
+): boolean {
+  return (
+    source.background ||
+    (source.publishedAt !== null &&
+      source.publishedAt < startDate &&
+      matchesDomain(source.domain, officialDomain))
+  );
+}
 
 function splitSentences(text: string): string[] {
   return (text.match(/[^.!?]+(?:[.!?]+["')\]]*|$)/g) ?? [])
@@ -129,6 +160,8 @@ export async function verifyBrief(
   brief: SynthesisBrief,
   facts: Fact[],
   sources: Source[],
+  candidate: Pick<Candidate, "officialDomain">,
+  meetingAt: string,
   stats: RunStats = createRunStats(),
 ): Promise<CleanedBrief> {
   const validatedBrief = SynthesisBriefSchema.parse(brief);
@@ -136,12 +169,21 @@ export async function verifyBrief(
   const validatedSources = z.array(SourceSchema).parse(sources);
   const factById = new Map(validatedFacts.map((fact) => [fact.id, fact]));
   const sourceById = new Map(validatedSources.map((source) => [source.id, source]));
+  const { startDate, endDate } = getDateWindow(meetingAt);
+  const twelveMonthCutoff = getTwelveMonthCutoff(meetingAt);
   const locations = collectSentences(validatedBrief);
   const localChecks = new Map<string, z.infer<typeof SentenceCheckSchema>>();
   const modelInputs: Array<{
     sentenceId: string;
     sentence: string;
-    snippets: Array<{ sourceId: string; snippet: string }>;
+    section: keyof SynthesisBrief;
+    snippets: Array<{
+      sourceId: string;
+      snippet: string;
+      publishedAt: string;
+      background: boolean;
+      blocklisted: boolean;
+    }>;
   }> = [];
 
   locations.forEach((location, index) => {
@@ -168,12 +210,79 @@ export async function verifyBrief(
       return;
     }
 
+    const resolvedSources = citedSources.filter(
+      (source): source is Source => source !== undefined,
+    );
+    const backgroundSources = resolvedSources.filter((source) =>
+      isBackgroundSource(source, startDate, candidate.officialDomain),
+    );
+    const invalidDateSource = resolvedSources.find(
+      (source) =>
+        !source.publishedAt ||
+        source.publishedAt > endDate ||
+        (source.publishedAt < startDate &&
+          !matchesDomain(source.domain, candidate.officialDomain)),
+    );
+    let localReason: string | undefined;
+    if (invalidDateSource) {
+      localReason =
+        "A cited source is missing a publication date or is outside the permitted date window.";
+    } else if (
+      backgroundSources.length > 0 &&
+      location.section !== "summary"
+    ) {
+      localReason =
+        "Background sources may support only the At a glance section.";
+    } else if (
+      resolvedSources.every((source) => isBlocklistedDomain(source.domain))
+    ) {
+      localReason = "A blocklisted domain cannot be the only source for a claim.";
+    } else if (
+      rollingYearClaimPattern.test(location.sentence) &&
+      !resolvedSources.some(
+        (source) =>
+          source.publishedAt !== null &&
+          isWithinDateRange(
+            source.publishedAt,
+            twelveMonthCutoff,
+            endDate,
+          ),
+      )
+    ) {
+      localReason =
+        "A time-period claim requires a source published within that period.";
+    } else if (
+      currentYearClaimPattern.test(location.sentence) &&
+      !resolvedSources.some(
+        (source) =>
+          source.publishedAt !== null &&
+          source.publishedAt.startsWith(endDate.slice(0, 4)) &&
+          source.publishedAt <= endDate,
+      )
+    ) {
+      localReason =
+        "A current-year claim requires a source published during the current year.";
+    }
+
+    if (localReason) {
+      localChecks.set(sentenceId, {
+        id: sentenceId,
+        verdict: "unsupported",
+        reason: localReason,
+      });
+      return;
+    }
+
     modelInputs.push({
       sentenceId,
       sentence: location.sentence,
-      snippets: citedSources.map((source) => ({
-        sourceId: source!.id,
-        snippet: source!.snippet,
+      section: location.section,
+      snippets: resolvedSources.map((source) => ({
+        sourceId: source.id,
+        snippet: source.snippet,
+        publishedAt: source.publishedAt!,
+        background: backgroundSources.includes(source),
+        blocklisted: isBlocklistedDomain(source.domain),
       })),
     });
   });
@@ -205,7 +314,7 @@ export async function verifyBrief(
             {
               role: "system",
               content:
-                'Verify each sentence using ONLY its provided cited snippets. Do not use prior knowledge. Mark supported only when the snippets directly support the full sentence; mark partial when they support only part of it; mark unsupported when they do not support it. Give a concise reason based only on the snippets. Return ONLY a JSON object with a top-level key \'checks\'. Never return a bare array. Never rename the key. Use exactly this shape: {"checks":[{"id":"<sentence id>","verdict":"supported","reason":"<short>"}]}. The verdict must be "supported", "partial", or "unsupported". Every sentence id I send must appear exactly once in checks.',
+                'Verify each sentence using ONLY its provided cited snippets. Do not use prior knowledge. Mark supported only when the snippets directly support the full sentence; mark partial when they support only part of it; mark unsupported when they do not support it. Give a concise reason based only on the snippets. A blocklisted domain cannot be the only support for a claim. Out-of-window sources from the locked firm domain may support only stable facts in the At a glance summary; such a claim must be explicitly labeled Background and dated from its cited source. Drop out-of-window sources from every other section. Drop non-official out-of-window sources everywhere. Time-period claims such as "last twelve months" or "this year" require a source published within that period. Return ONLY a JSON object with a top-level key \'checks\'. Never return a bare array. Never rename the key. Use exactly this shape: {"checks":[{"id":"<sentence id>","verdict":"supported","reason":"<short>"}]}. The verdict must be "supported", "partial", or "unsupported". Every sentence id I send must appear exactly once in checks.',
             },
             {
               role: "user",
@@ -232,7 +341,16 @@ export async function verifyBrief(
   }
 
   const allChecks = new Map([...localChecks, ...modelChecks]);
-  const output: Record<string, Array<{ text: string; factIds: string[]; date?: string; verificationStatus?: "partial" }>> = {
+  const output: Record<
+    string,
+    Array<{
+      text: string;
+      factIds: string[];
+      date?: string;
+      verificationStatus?: "partial";
+      backgroundDate?: string;
+    }>
+  > = {
     summary: [],
     timeline: [],
     recentInvestments: [],
@@ -254,10 +372,33 @@ export async function verifyBrief(
       return;
     }
 
+    const citedSources = location.factIds.flatMap(
+      (factId) =>
+        factById
+          .get(factId)
+          ?.sourceIds.map((sourceId) => sourceById.get(sourceId))
+          .filter((source): source is Source => source !== undefined) ?? [],
+    );
+    const isBackgroundOnlyClaim =
+      citedSources.length > 0 &&
+      citedSources.every((source) =>
+        isBackgroundSource(source, startDate, candidate.officialDomain),
+      );
+    const backgroundDates = [
+      ...new Set(
+        (isBackgroundOnlyClaim ? citedSources : [])
+          .map((source) => source.publishedAt)
+          .filter((date): date is string => date !== null),
+      ),
+    ];
+
     output[location.section].push({
       text: location.sentence,
       factIds: location.factIds,
       ...(location.date ? { date: location.date } : {}),
+      ...(location.section === "summary" && backgroundDates.length
+        ? { backgroundDate: backgroundDates.join(", ") }
+        : {}),
       ...(check.verdict === "partial"
         ? { verificationStatus: "partial" as const }
         : {}),
