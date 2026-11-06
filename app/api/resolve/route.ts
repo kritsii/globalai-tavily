@@ -11,7 +11,7 @@ const ResultSchema = z.object({
   candidates: z.array(
     CandidateSchema.extend({
       evidenceUrls: z.array(z.string().url()).min(1),
-    }),
+    }).strip(),
   ).max(3),
 });
 
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
         {
           role: "system",
           content:
-            "Resolve the investor name using only the supplied Tavily search results. Return valid JSON containing at most three distinct candidates. Never invent people, firms, official domains, or descriptors. Use a candidate only when the results support its identity. officialDomain must be the domain of a supplied result that represents the candidate's official website. Each candidate must cite one or more exact result URLs in evidenceUrls. Use an empty candidate array if the results do not support a reliable match. matchScore is a confidence score from 0 to 1.",
+            'Resolve the investor name using only the supplied Tavily search results. Return JSON shaped as {"candidates":[{"type":"firm","name":"...","officialDomain":"...","descriptor":"...","matchScore":0.0,"evidenceUrls":["https://..."]}]}, with at most three candidates. type must be exactly "firm", "partner", or "other". Include only these candidate fields. Never invent people, firms, official domains, descriptors, or evidence URLs. Use a candidate only when the results support its identity. officialDomain must be the domain of a supplied result that represents the candidate\'s official website. Each candidate must cite one or more exact result URLs in evidenceUrls. Use an empty candidate array if the results do not support a reliable match. matchScore must be a number from 0 to 1.',
         },
         {
           role: "user",

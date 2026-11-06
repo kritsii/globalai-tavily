@@ -63,6 +63,26 @@ function isJsonModeUnsupported(error: unknown): boolean {
   );
 }
 
+function isTransientLLMError(error: unknown): boolean {
+  return (
+    error instanceof OpenAI.APIError &&
+    (error.status === 429 || (error.status !== null && error.status >= 500))
+  );
+}
+
+async function retryTransientRequest<T>(request: () => Promise<T>): Promise<T> {
+  const maxRetries = 2;
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await request();
+    } catch (error) {
+      if (!isTransientLLMError(error) || attempt >= maxRetries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+    }
+  }
+}
+
 async function requestCompletion(
   client: OpenAI,
   model: string,
@@ -75,20 +95,24 @@ async function requestCompletion(
     : {};
 
   try {
-    return await client.chat.completions.create({
-      model,
-      messages,
-      ...tokenLimit,
-      ...(json ? { response_format: { type: "json_object" } } : {}),
-    });
+    return await retryTransientRequest(() =>
+      client.chat.completions.create({
+        model,
+        messages,
+        ...tokenLimit,
+        ...(json ? { response_format: { type: "json_object" } } : {}),
+      }),
+    );
   } catch (error) {
     if (!json || !isJsonModeUnsupported(error)) throw error;
 
-    return client.chat.completions.create({
-      model,
-      messages,
-      ...tokenLimit,
-    });
+    return retryTransientRequest(() =>
+      client.chat.completions.create({
+        model,
+        messages,
+        ...tokenLimit,
+      }),
+    );
   }
 }
 

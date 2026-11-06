@@ -17,6 +17,32 @@ const TimelineEntrySchema = CitedSentenceSchema.extend({
   date: z.string().trim().min(1),
 });
 
+const CitedSentenceSections = [
+  "summary",
+  "timeline",
+  "recentInvestments",
+  "thesisDrift",
+  "portfolioConflicts",
+  "conversationStarters",
+] as const;
+
+function normalizeBareSentences(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return value;
+  }
+
+  const normalized: Record<string, unknown> = { ...value };
+  for (const section of CitedSentenceSections) {
+    const entries = normalized[section];
+    if (Array.isArray(entries)) {
+      normalized[section] = entries.map((entry) =>
+        typeof entry === "string" ? { text: entry, factIds: [] } : entry,
+      );
+    }
+  }
+  return normalized;
+}
+
 export const SynthesisBriefSchema = z.object({
   summary: z.tuple([CitedSentenceSchema, CitedSentenceSchema]),
   timeline: z.array(TimelineEntrySchema),
@@ -84,7 +110,18 @@ export async function synthesizeBrief(
       {
         role: "system",
         content:
-          "Return valid JSON for an investor brief using ONLY the provided facts. Do not use outside knowledge, add context, make assumptions, or infer unsupported claims. Every sentence must include one or more exact factIds that support it. The summary must contain exactly two sentences. Timeline entries must use dates exactly as stated on cited facts. Include recent investments only when directly evidenced by facts. Include thesisDrift only when facts show an evidence-backed change in thesis; otherwise return an empty array. Include portfolioConflicts only when facts directly support a comparison or conflict with the founder's startup; otherwise return an empty array. Provide exactly three conversation starters, each tied to at least one fact and explicitly relevant to the founder's startup. For any unsupported point, omit it rather than filling gaps.",
+          `Return valid JSON for an investor brief using ONLY the provided facts. Do not use outside knowledge, add context, make assumptions, or infer unsupported claims. Every sentence must include one or more exact factIds that support it. The summary must contain exactly two sentences. Timeline entries must use dates exactly as stated on cited facts. Include recent investments only when directly evidenced by facts. Include thesisDrift only when facts show an evidence-backed change in thesis; otherwise return an empty array. Include portfolioConflicts only when facts directly support a comparison or conflict with the founder's startup; otherwise return an empty array. Provide exactly three conversation starters, each tied to at least one fact and explicitly relevant to the founder's startup. For any unsupported point, omit it rather than filling gaps.
+
+Return sentence entries as objects, never strings. Example:
+{
+  "summary": [{"text": "...", "factIds": ["F1", "F2"]}, {"text": "...", "factIds": ["F3"]}],
+  "timeline": [{"date": "...", "text": "...", "factIds": ["F1"]}],
+  "recentInvestments": [{"text": "...", "factIds": ["F2"]}],
+  "thesisDrift": [{"text": "...", "factIds": ["F3"]}],
+  "portfolioConflicts": [{"text": "...", "factIds": ["F1"]}],
+  "conversationStarters": [{"text": "...", "factIds": ["F1"]}, {"text": "...", "factIds": ["F2"]}, {"text": "...", "factIds": ["F3"]}]
+}
+Never output a bare string where an object is required. Every item must include text and factIds.`,
       },
       {
         role: "user",
@@ -94,7 +131,7 @@ export async function synthesizeBrief(
         }),
       },
     ],
-    BriefSchemaForFacts,
+    z.preprocess(normalizeBareSentences, BriefSchemaForFacts),
     { stats, maxCompletionTokens: 1_200 },
   );
 

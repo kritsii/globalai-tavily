@@ -28,6 +28,10 @@ const newsDomains = new Set([
 const primaryPathPattern =
   /(?:^|\/)(?:blog|newsroom|press|press-release|press-releases|investor-relations)(?:\/|$)/i;
 
+function isEmptySuccessResponseError(error: unknown): boolean {
+  return error instanceof Error && /(?:^|\s)200 Error: undefined(?:$|\s)/.test(error.message);
+}
+
 function isDomainOrSubdomain(domain: string, knownDomain: string): boolean {
   return domain === knownDomain || domain.endsWith(`.${knownDomain}`);
 }
@@ -137,13 +141,22 @@ export async function search(
   }
 
   const client = tavily({ apiKey });
-  const response = await client.search(normalizedQuery, {
+  const searchOptions = {
     maxResults: 8,
     startDate,
     endDate,
     includePublishedDate: true,
     filterByPublishedDate: true,
-  });
+    timeout: 30,
+  };
+  let response: Awaited<ReturnType<typeof client.search>>;
+  try {
+    response = await client.search(normalizedQuery, searchOptions);
+  } catch (error) {
+    if (!isEmptySuccessResponseError(error)) throw error;
+    response = await client.search(normalizedQuery, searchOptions);
+  }
+
   const sources = normalizeResults(response.results, startDate, endDate);
   cache.set(cacheKey, sources);
   return sources.map((source) => ({ ...source }));
