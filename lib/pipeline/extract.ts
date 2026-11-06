@@ -16,13 +16,17 @@ const ExtractionResponseSchema = z.object({
 });
 
 const MAX_SNIPPET_LENGTH = 450;
+const MAX_EXTRACTION_SOURCES = 12;
 
 export async function extractFacts(
   sources: Source[],
   candidate: Pick<Candidate, "name" | "officialDomain">,
   stats?: RunStats,
 ): Promise<Fact[]> {
-  const validatedSources = z.array(SourceSchema).parse(sources);
+  const validatedSources = z
+    .array(SourceSchema)
+    .parse(sources)
+    .slice(0, MAX_EXTRACTION_SOURCES);
   if (validatedSources.length === 0) return [];
 
   const model = process.env.MODEL_CHEAP?.trim();

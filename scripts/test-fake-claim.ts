@@ -9,28 +9,21 @@ async function main() {
   const fakeClaim =
     "Peak XV invested $900 billion in an underwater moon hotel in 2026.";
   const brief = {
-    summary: [
+    atAGlance: [
       { text: fakeClaim, factIds: ["F1"] },
       { text: "Peak XV Partners is a venture capital firm.", factIds: ["F1"] },
     ],
-    timeline: [],
-    recentInvestments: [],
-    thesisDrift: [],
-    portfolioConflicts: [],
-    conversationStarters: [
-      {
-        text: "What investment themes are most important to the firm?",
-        factIds: ["F1"],
-      },
-      {
-        text: "How does the firm evaluate new opportunities?",
-        factIds: ["F1"],
-      },
-      {
-        text: "What makes a company a good fit for the firm?",
-        factIds: ["F1"],
-      },
-    ],
+    whatLookingForNow: [],
+    dealTermsAndProcess: [],
+    fitWithStartup: {
+      verdict: "Not enough evidence",
+      reasons: [
+        { text: "The firm is a venture capital firm.", factIds: ["F1"] },
+        { text: "Its focus needs further research.", factIds: ["F1"] },
+      ],
+    },
+    recentSignals: { items: [], background: null },
+    conversationStarters: [],
   } satisfies SynthesisBrief;
   const facts = [
     {
@@ -70,7 +63,7 @@ async function main() {
       {
         fakeClaimWasDropped,
         droppedClaims: stats.droppedClaims,
-        cleanedSummary: cleaned.summary,
+        cleanedAtAGlance: cleaned.atAGlance,
       },
       null,
       2,

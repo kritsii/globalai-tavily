@@ -10,6 +10,7 @@ type SearchOptions = {
   meetingAt: string;
   windowDays?: number;
   includeDomains?: string[];
+  topic?: "news";
 };
 
 const cache = new Map<string, Source[]>();
@@ -118,7 +119,7 @@ function normalizeResults(
 
 export async function search(
   query: string,
-  { meetingAt, windowDays = 30, includeDomains }: SearchOptions,
+  { meetingAt, windowDays = 30, includeDomains, topic }: SearchOptions,
 ): Promise<Source[]> {
   const normalizedQuery = query.trim();
   if (!normalizedQuery) {
@@ -131,6 +132,7 @@ export async function search(
     startDate,
     endDate,
     includeDomains ?? [],
+    topic ?? null,
   ]);
   const cached = cache.get(cacheKey);
   if (cached) return cached.map((source) => ({ ...source }));
@@ -149,6 +151,7 @@ export async function search(
     filterByPublishedDate: filterByDate,
     timeout: 30,
     ...(includeDomains?.length ? { includeDomains } : {}),
+    ...(topic ? { topic } : {}),
   };
   let response: Awaited<ReturnType<typeof client.search>>;
   try {

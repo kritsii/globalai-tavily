@@ -1,5 +1,5 @@
-import PitchsideWorkspace from "@/components/pitchside-workspace";
+import LandingPage from "@/components/landing-page";
 
 export default function Home() {
-  return <PitchsideWorkspace />;
+  return <LandingPage />;
 }

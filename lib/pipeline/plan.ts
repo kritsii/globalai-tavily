@@ -21,6 +21,7 @@ export const SearchQuerySchema = z.object({
   category: SearchQueryCategorySchema,
   query: z.string().trim().min(3),
   includeDomains: z.array(z.string().trim().min(1)).optional(),
+  topic: z.literal("news").optional(),
 });
 
 export const SearchPlanSchema = z
@@ -83,30 +84,37 @@ export async function planSearchQueries(
     { stats, maxCompletionTokens: 800 },
   );
 
-  const queries = data.queries.map(({ category, query }) => ({
-    category,
-    query: quoteFirmName(query, selectedCandidate.name),
-  }));
-  const dedicatedDomainQuery = SearchQuerySchema.parse({
-    category: "firm_news",
-    query: `"${selectedCandidate.name}" official website portfolio blog news`,
-    includeDomains: [selectedCandidate.officialDomain],
-  });
-
-  if (queries.length >= 10) {
-    const duplicateCategoryIndex = queries.findIndex((query, index) =>
-      queries.some(
-        (other, otherIndex) =>
-          otherIndex !== index && other.category === query.category,
-      ),
-    );
-    if (duplicateCategoryIndex < 0) {
-      throw new Error("Cannot add the official-domain query to the search plan.");
+  const queriesByCategory = new Map<SearchQueryCategory, string>();
+  for (const { category, query } of data.queries) {
+    if (!queriesByCategory.has(category)) {
+      queriesByCategory.set(category, query);
     }
-    queries.splice(duplicateCategoryIndex, 1);
   }
+  const queries = SearchQueryCategorySchema.options.map((category) => ({
+    category,
+    query: quoteFirmName(
+      queriesByCategory.get(category)!,
+      selectedCandidate.name,
+    ),
+  }));
+  const targetedQueries = [
+    SearchQuerySchema.parse({
+      category: "thesis_statements",
+      query: `"${selectedCandidate.name}" "Requests for Startups" OR thesis OR "focus areas"`,
+      includeDomains: [selectedCandidate.officialDomain],
+    }),
+    SearchQuerySchema.parse({
+      category: "new_investments",
+      query: `"${selectedCandidate.name}" announces investment OR portfolio OR batch ${input.startup.sector} news`,
+      topic: "news",
+    }),
+    SearchQuerySchema.parse({
+      category: "partner_posts_interviews",
+      query: `"${selectedCandidate.name}" partner interview OR podcast OR post`,
+    }),
+  ];
 
   return SearchPlanSchema.parse({
-    queries: [...queries, dedicatedDomainQuery],
+    queries: [...queries, ...targetedQueries],
   });
 }

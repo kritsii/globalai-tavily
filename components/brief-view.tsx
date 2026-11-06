@@ -200,40 +200,93 @@ export default function BriefView({ candidateName, finalized, stats }: Props) {
           <h2 className="document-title">{candidateName}</h2>
           <p className="document-kicker">INVESTOR MEETING BRIEF</p>
 
+          <BriefSection title="At a glance" entries={brief.atAGlance} finalized={finalized} />
           <BriefSection
-            title="At a glance"
-            entries={brief.summary}
+            title="What they're looking for now"
+            entries={brief.whatLookingForNow}
             finalized={finalized}
+            emptyText="No current focus, Requests for Startups, or thesis facts found on the firm's domain."
           />
           <BriefSection
-            title="Recent activity"
-            entries={brief.timeline}
+            title="Deal terms and process"
+            entries={brief.dealTermsAndProcess}
             finalized={finalized}
-            emptyText="No dated updates found in the sources searched."
+            emptyText="No sourced deal terms or process details found."
           />
-          <BriefSection
-            title="New investments"
-            entries={brief.recentInvestments}
-            finalized={finalized}
-            emptyText="No investment announcements found in the sources searched."
-          />
-          <BriefSection
-            title="Thesis signals"
-            entries={brief.thesisDrift}
-            finalized={finalized}
-            emptyText="No evidence-backed thesis changes found."
-          />
-          <BriefSection
-            title="Portfolio & fit"
-            entries={brief.portfolioConflicts}
-            finalized={finalized}
-            emptyText="No sourced portfolio conflicts identified."
-          />
+          <section className="document-section">
+            <h3>Fit with your startup</h3>
+            <p className="fit-verdict">
+              <strong>Verdict:</strong> {brief.fitWithStartup.verdict}
+            </p>
+            {brief.fitWithStartup.reasons.length ? (
+              <ul className="fit-reasons">
+                {brief.fitWithStartup.reasons.map((reason, index) => (
+                  <li key={`${reason.text}-${index}`}>
+                    <CitedSentence entry={reason} finalized={finalized} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-section">
+                Not enough sourced evidence to compare the submitted sector, stage, and raise size.
+              </p>
+            )}
+          </section>
+          <section className="document-section">
+            <h3>Recent signals</h3>
+            {brief.recentSignals.items.length ? (
+              brief.recentSignals.items.map((entry, index) => (
+                <CitedSentence
+                  entry={entry}
+                  finalized={finalized}
+                  key={`${entry.text}-${index}`}
+                />
+              ))
+            ) : (
+              <p className="empty-section">
+                No dated updates in the last 30 days
+              </p>
+            )}
+            {brief.recentSignals.background && (
+              <CitedSentence
+                entry={{
+                  ...brief.recentSignals.background,
+                  backgroundDate:
+                    brief.recentSignals.background.backgroundDate ??
+                    finalized.facts
+                      .filter((fact) =>
+                        brief.recentSignals.background?.factIds.includes(fact.id),
+                      )
+                      .flatMap((fact) => fact.sourceIds)
+                      .map((sourceId) =>
+                        sources.find((source) => source.id === sourceId)?.publishedAt,
+                      )
+                      .filter((date): date is string => date !== null && date !== undefined)
+                      .join(", "),
+                }}
+                finalized={finalized}
+              />
+            )}
+          </section>
           <BriefSection
             title="Conversation starters"
             entries={brief.conversationStarters}
             finalized={finalized}
           />
+          <section className="document-section">
+            <h3>Gaps</h3>
+            {gaps.length ? (
+              <ul className="gap-list">
+                {gaps.map((gap) => (
+                  <li key={gap.topic}>
+                    <strong>{gap.topic}:</strong> {gap.description}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-section">No major research gaps identified.</p>
+            )}
+          </section>
         </article>
 
         <aside className="brief-rail source-rail">

@@ -82,8 +82,12 @@ export async function research(
   const staleCutoff = getStaleCutoff(meetingAt);
   const dateWindow = getDateWindow(meetingAt);
   const results = await Promise.all(
-    validatedPlan.queries.map(({ query, includeDomains }) =>
-      search(query, { meetingAt, includeDomains }),
+    validatedPlan.queries.map(({ query, includeDomains, topic }) =>
+      search(query, {
+        meetingAt,
+        includeDomains,
+        ...(topic ? { topic } : {}),
+      }),
     ),
   );
 

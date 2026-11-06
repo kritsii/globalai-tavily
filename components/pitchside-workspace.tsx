@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { z } from "zod";
 import BriefView from "@/components/brief-view";
 import type { FinalizedBrief } from "@/lib/pipeline/finalize";
@@ -25,11 +26,17 @@ const CitedSentenceSchema = z.object({
 
 const ClientFinalizedBriefSchema = z.object({
   brief: z.object({
-    summary: z.array(CitedSentenceSchema),
-    timeline: z.array(CitedSentenceSchema.extend({ date: z.string() })),
-    recentInvestments: z.array(CitedSentenceSchema),
-    thesisDrift: z.array(CitedSentenceSchema),
-    portfolioConflicts: z.array(CitedSentenceSchema),
+    atAGlance: z.array(CitedSentenceSchema),
+    whatLookingForNow: z.array(CitedSentenceSchema),
+    dealTermsAndProcess: z.array(CitedSentenceSchema),
+    fitWithStartup: z.object({
+      verdict: z.enum(["Strong", "Partial", "Weak", "Not enough evidence"]),
+      reasons: z.array(CitedSentenceSchema),
+    }),
+    recentSignals: z.object({
+      items: z.array(CitedSentenceSchema),
+      background: CitedSentenceSchema.nullable(),
+    }),
     conversationStarters: z.array(CitedSentenceSchema),
   }),
   facts: z.array(
@@ -318,21 +325,20 @@ export default function PitchsideWorkspace() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <button className="brand" onClick={resetToNewBrief} type="button">
+        <Link className="brand" href="/">
           <span className="brand__mark" aria-hidden="true">
             <BrandIcon />
           </span>
           <span>pitchside</span>
           <span className="brand__beta">FIELDNOTES</span>
-        </button>
+        </Link>
         <nav className="app-nav" aria-label="Main navigation">
-          <button
+          <Link
             className={screen !== "library" ? "active" : ""}
-            onClick={resetToNewBrief}
-            type="button"
+            href="/new"
           >
             New brief
-          </button>
+          </Link>
           <button
             className={screen === "library" ? "active" : ""}
             onClick={() => {
