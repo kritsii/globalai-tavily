@@ -77,6 +77,7 @@ export async function POST(request: Request) {
   }
 
   const { candidate, briefInput } = parsedRequest.data;
+  const runContext = { candidate, briefInput };
   const stats = createRunStats();
   let cancelled = false;
   request.signal.addEventListener("abort", () => {
@@ -104,14 +105,22 @@ export async function POST(request: Request) {
         let stage = "plan";
         try {
           send("progress", { stage });
-          const plan = await planSearchQueries(candidate, briefInput, stats);
+          const plan = await planSearchQueries(
+            runContext.candidate,
+            runContext.briefInput,
+            stats,
+          );
           if (cancelled) return;
           checkBudget();
           send("progress", { stage, queryCount: plan.queries.length });
 
           stage = "research";
           send("progress", { stage });
-          const researchResult = await research(plan, briefInput.meetingAt);
+          const researchResult = await research(
+            plan,
+            runContext.briefInput.meetingAt,
+            runContext.candidate,
+          );
           if (cancelled) return;
           send("progress", {
             stage,
@@ -121,14 +130,23 @@ export async function POST(request: Request) {
 
           stage = "extract";
           send("progress", { stage, sourceCount: researchResult.sources.length });
-          const facts = await extractFacts(researchResult.sources, stats);
+          const facts = await extractFacts(
+            researchResult.sources,
+            runContext.candidate,
+            stats,
+          );
           if (cancelled) return;
           checkBudget();
           send("progress", { stage, factCount: facts.length });
 
           stage = "synthesize";
           send("progress", { stage, factCount: facts.length });
-          const synthesized = await synthesizeBrief(facts, briefInput, stats);
+          const synthesized = await synthesizeBrief(
+            facts,
+            runContext.briefInput,
+            runContext.candidate,
+            stats,
+          );
           if (cancelled) return;
           checkBudget();
           send("progress", { stage });

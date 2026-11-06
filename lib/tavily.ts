@@ -4,6 +4,7 @@ import { SourceSchema, type Source, type SourceType } from "@/types";
 type SearchOptions = {
   meetingAt: string;
   windowDays?: number;
+  includeDomains?: string[];
 };
 
 const cache = new Map<string, Source[]>();
@@ -80,6 +81,7 @@ function normalizeResults(
   results: Awaited<ReturnType<ReturnType<typeof tavily>["search"]>>["results"],
   startDate: string,
   endDate: string,
+  filterByDate: boolean,
 ): Source[] {
   const seenUrls = new Set<string>();
   const sources: Source[] = [];
@@ -88,7 +90,10 @@ function normalizeResults(
     const publishedAt = result.publishedDate
       ? toUtcDate(result.publishedDate)
       : undefined;
-    if (!publishedAt || publishedAt < startDate || publishedAt > endDate) {
+    if (
+      filterByDate &&
+      (!publishedAt || publishedAt < startDate || publishedAt > endDate)
+    ) {
       continue;
     }
 
@@ -109,7 +114,7 @@ function normalizeResults(
       id: result.id || normalizedUrl,
       url: normalizedUrl,
       title: result.title,
-      publishedAt,
+      publishedAt: publishedAt ?? null,
       domain,
       sourceType: classifySource(domain, url),
       snippet: result.content.slice(0, 600),
@@ -123,7 +128,7 @@ function normalizeResults(
 
 export async function search(
   query: string,
-  { meetingAt, windowDays = 30 }: SearchOptions,
+  { meetingAt, windowDays = 30, includeDomains }: SearchOptions,
 ): Promise<Source[]> {
   const normalizedQuery = query.trim();
   if (!normalizedQuery) {
@@ -131,7 +136,12 @@ export async function search(
   }
 
   const { startDate, endDate } = getWindow(meetingAt, windowDays);
-  const cacheKey = JSON.stringify([normalizedQuery, startDate, endDate]);
+  const cacheKey = JSON.stringify([
+    normalizedQuery,
+    startDate,
+    endDate,
+    includeDomains ?? [],
+  ]);
   const cached = cache.get(cacheKey);
   if (cached) return cached.map((source) => ({ ...source }));
 
@@ -141,13 +151,14 @@ export async function search(
   }
 
   const client = tavily({ apiKey });
+  const filterByDate = !includeDomains?.length;
   const searchOptions = {
     maxResults: 8,
-    startDate,
-    endDate,
+    ...(filterByDate ? { startDate, endDate } : {}),
     includePublishedDate: true,
-    filterByPublishedDate: true,
+    filterByPublishedDate: filterByDate,
     timeout: 30,
+    ...(includeDomains?.length ? { includeDomains } : {}),
   };
   let response: Awaited<ReturnType<typeof client.search>>;
   try {
@@ -157,7 +168,12 @@ export async function search(
     response = await client.search(normalizedQuery, searchOptions);
   }
 
-  const sources = normalizeResults(response.results, startDate, endDate);
+  const sources = normalizeResults(
+    response.results,
+    startDate,
+    endDate,
+    filterByDate,
+  );
   cache.set(cacheKey, sources);
   return sources.map((source) => ({ ...source }));
 }

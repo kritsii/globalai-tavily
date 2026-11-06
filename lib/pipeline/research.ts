@@ -5,7 +5,13 @@ import {
   type SearchPlan,
   type SearchQueryCategory,
 } from "@/lib/pipeline/plan";
-import { SourceSchema, type Source, type SourceType } from "@/types";
+import {
+  CandidateSchema,
+  SourceSchema,
+  type Candidate,
+  type Source,
+  type SourceType,
+} from "@/types";
 import { z } from "zod";
 
 export const ResearchResultSchema = z.object({
@@ -43,26 +49,43 @@ function getStaleCutoff(meetingAt: string): number {
   return new Date(parsedMeetingAt.data).getTime() - 7 * 24 * 60 * 60 * 1000;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function mentionsFirm(source: Source, firmName: string): boolean {
+  const phrase = firmName.trim().replace(/\s+/g, " ");
+  if (!phrase) return false;
+  const boundaryPattern = new RegExp(
+    `(^|[^\\p{L}\\p{N}])${escapeRegExp(phrase)}($|[^\\p{L}\\p{N}])`,
+    "iu",
+  );
+  return [source.title, source.snippet].some((text) =>
+    boundaryPattern.test(text.replace(/\s+/g, " ")),
+  );
+}
+
+function matchesOfficialDomain(sourceDomain: string, officialDomain: string): boolean {
+  const domain = sourceDomain.toLowerCase().replace(/^www\./, "");
+  const official = officialDomain.toLowerCase().replace(/^www\./, "");
+  return domain === official || domain.endsWith(`.${official}`);
+}
+
 export async function research(
   plan: SearchPlan,
   meetingAt: string,
+  candidate: Candidate,
 ): Promise<ResearchResult> {
   const validatedPlan = SearchPlanSchema.parse(plan);
+  const selectedCandidate = CandidateSchema.parse(candidate);
   const staleCutoff = getStaleCutoff(meetingAt);
   const results = await Promise.all(
-    validatedPlan.queries.map(({ query }) => search(query, { meetingAt })),
+    validatedPlan.queries.map(({ query, includeDomains }) =>
+      search(query, { meetingAt, includeDomains }),
+    ),
   );
 
   const byUrl = new Map<string, Source>();
-  const urlsByCategory = new Map<SearchQueryCategory, Set<string>>();
-  validatedPlan.queries.forEach(({ category }, index) => {
-    const categoryUrls = urlsByCategory.get(category) ?? new Set<string>();
-    for (const source of results[index]) {
-      categoryUrls.add(normalizeUrl(source.url));
-    }
-    urlsByCategory.set(category, categoryUrls);
-  });
-
   for (const source of results.flat()) {
     const url = normalizeUrl(source.url);
     if (byUrl.has(url)) continue;
@@ -70,7 +93,29 @@ export async function research(
     byUrl.set(url, SourceSchema.parse({ ...source, url }));
   }
 
-  const orderedSources = [...byUrl.values()].sort((left, right) => {
+  const mergedSources = [...byUrl.values()];
+  const relevantSources = mergedSources.filter(
+    (source) =>
+      matchesOfficialDomain(source.domain, selectedCandidate.officialDomain) ||
+      mentionsFirm(source, selectedCandidate.name),
+  );
+  const droppedSourceCount = mergedSources.length - relevantSources.length;
+  console.info(
+    `Research relevance filter dropped ${droppedSourceCount} sources for ${selectedCandidate.name}.`,
+  );
+
+  const relevantUrls = new Set(relevantSources.map((source) => source.url));
+  const urlsByCategory = new Map<SearchQueryCategory, Set<string>>();
+  validatedPlan.queries.forEach(({ category }, index) => {
+    const categoryUrls = urlsByCategory.get(category) ?? new Set<string>();
+    for (const source of results[index]) {
+      const url = normalizeUrl(source.url);
+      if (relevantUrls.has(url)) categoryUrls.add(url);
+    }
+    urlsByCategory.set(category, categoryUrls);
+  });
+
+  const orderedSources = relevantSources.sort((left, right) => {
     const priority = SourcePriority[left.sourceType] - SourcePriority[right.sourceType];
     if (priority !== 0) return priority;
 

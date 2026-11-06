@@ -4,6 +4,7 @@ import {
   BriefInputSchema,
   FactSchema,
   type BriefInput,
+  type Candidate,
   type Fact,
   type RunStats,
 } from "@/types";
@@ -57,6 +58,7 @@ export type SynthesisBrief = z.output<typeof SynthesisBriefSchema>;
 export async function synthesizeBrief(
   facts: Fact[],
   briefInput: BriefInput,
+  candidate: Pick<Candidate, "name" | "officialDomain">,
   stats?: RunStats,
 ): Promise<SynthesisBrief> {
   const validatedFacts = z.array(FactSchema).parse(facts);
@@ -110,7 +112,7 @@ export async function synthesizeBrief(
       {
         role: "system",
         content:
-          `Return valid JSON for an investor brief using ONLY the provided facts. Do not use outside knowledge, add context, make assumptions, or infer unsupported claims. Every sentence must include one or more exact factIds that support it. The summary must contain exactly two sentences. Timeline entries must use dates exactly as stated on cited facts. Include recent investments only when directly evidenced by facts. Include thesisDrift only when facts show an evidence-backed change in thesis; otherwise return an empty array. Include portfolioConflicts only when facts directly support a comparison or conflict with the founder's startup; otherwise return an empty array. Provide exactly three conversation starters, each tied to at least one fact and explicitly relevant to the founder's startup. For any unsupported point, omit it rather than filling gaps.
+          `The subject is ${candidate.name} (${candidate.officialDomain}). Ignore any source about a different organization with a similar name. If sources are about another entity, return no facts. Return valid JSON for an investor brief using ONLY the provided facts. Do not use outside knowledge, add context, make assumptions, or infer unsupported claims. Every sentence must include one or more exact factIds that support it. The summary must contain exactly two sentences. Timeline entries must use dates exactly as stated on cited facts. Include recent investments only when directly evidenced by facts. Include thesisDrift only when facts show an evidence-backed change in thesis; otherwise return an empty array. Include portfolioConflicts only when facts directly support a comparison or conflict with the founder's startup; otherwise return an empty array. Provide exactly three conversation starters, each tied to at least one fact and explicitly relevant to the founder's startup. For any unsupported point, omit it rather than filling gaps.
 
 Return sentence entries as objects, never strings. Example:
 {

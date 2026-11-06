@@ -20,6 +20,7 @@ export const SearchQueryCategorySchema = z.enum([
 export const SearchQuerySchema = z.object({
   category: SearchQueryCategorySchema,
   query: z.string().trim().min(3),
+  includeDomains: z.array(z.string().trim().min(1)).optional(),
 });
 
 export const SearchPlanSchema = z
@@ -43,6 +44,13 @@ export type SearchQueryCategory = z.infer<typeof SearchQueryCategorySchema>;
 export type SearchQuery = z.infer<typeof SearchQuerySchema>;
 export type SearchPlan = z.infer<typeof SearchPlanSchema>;
 
+function quoteFirmName(query: string, firmName: string): string {
+  const quotedName = `"${firmName}"`;
+  return query.toLocaleLowerCase().includes(quotedName.toLocaleLowerCase())
+    ? query
+    : `${quotedName} ${query}`;
+}
+
 export async function planSearchQueries(
   candidate: Candidate,
   briefInput: BriefInput,
@@ -59,7 +67,7 @@ export async function planSearchQueries(
       {
         role: "system",
         content:
-          'Return valid JSON shaped as {"queries":[{"category":"firm_news","query":"..."}]}. Create 6 to 10 distinct, directly searchable queries and include every category exactly as spelled here: "firm_news", "new_investments", "partner_posts_interviews", "portfolio_news", "thesis_statements", "sector_competitors". Each query category must be exactly one of those six values; do not invent, rename, or abbreviate categories. Tailor queries to the selected investor and startup. For sector competitors, search for companies in the sector without asserting or inventing competitor names.',
+          'Return valid JSON shaped as {"queries":[{"category":"firm_news","query":"..."}]}. Create 6 to 10 distinct, directly searchable queries and include every category exactly as spelled here: "firm_news", "new_investments", "partner_posts_interviews", "portfolio_news", "thesis_statements", "sector_competitors". Each query category must be exactly one of those six values; do not invent, rename, or abbreviate categories. Every query must quote the full firm name exactly. Tailor queries to the selected investor and startup. For sector competitors, search for companies in the sector without asserting or inventing competitor names.',
       },
       {
         role: "user",
@@ -75,5 +83,30 @@ export async function planSearchQueries(
     { stats, maxCompletionTokens: 800 },
   );
 
-  return data;
+  const queries = data.queries.map(({ category, query }) => ({
+    category,
+    query: quoteFirmName(query, selectedCandidate.name),
+  }));
+  const dedicatedDomainQuery = SearchQuerySchema.parse({
+    category: "firm_news",
+    query: `"${selectedCandidate.name}" official website portfolio blog news`,
+    includeDomains: [selectedCandidate.officialDomain],
+  });
+
+  if (queries.length >= 10) {
+    const duplicateCategoryIndex = queries.findIndex((query, index) =>
+      queries.some(
+        (other, otherIndex) =>
+          otherIndex !== index && other.category === query.category,
+      ),
+    );
+    if (duplicateCategoryIndex < 0) {
+      throw new Error("Cannot add the official-domain query to the search plan.");
+    }
+    queries.splice(duplicateCategoryIndex, 1);
+  }
+
+  return SearchPlanSchema.parse({
+    queries: [...queries, dedicatedDomainQuery],
+  });
 }

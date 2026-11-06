@@ -4,6 +4,7 @@ import {
   FactSchema,
   SourceSchema,
   type Fact,
+  type Candidate,
   type RunStats,
   type Source,
 } from "@/types";
@@ -18,6 +19,7 @@ const MAX_SNIPPET_LENGTH = 450;
 
 export async function extractFacts(
   sources: Source[],
+  candidate: Pick<Candidate, "name" | "officialDomain">,
   stats?: RunStats,
 ): Promise<Fact[]> {
   const validatedSources = z.array(SourceSchema).parse(sources);
@@ -36,7 +38,7 @@ export async function extractFacts(
         {
           role: "system",
           content:
-            "Extract at most one concise factual claim per source, strictly from the provided snippets. Use ONLY those snippets; do not use prior knowledge, infer unsupported details, or add facts. Each fact must cite the exact sourceId that supports it. If a snippet does not support a clear fact, omit it. Set date to a date explicitly stated in the snippet, otherwise null. Return valid JSON with a facts array.",
+            `The subject is ${candidate.name} (${candidate.officialDomain}). Ignore any source about a different organization with a similar name. If sources are about another entity, return no facts. Extract at most one concise factual claim per source, strictly from the provided snippets. Use ONLY those snippets; do not use prior knowledge, infer unsupported details, or add facts. Each fact must cite the exact sourceId that supports it. If a snippet does not support a clear fact, omit it. Set date to a date explicitly stated in the snippet, otherwise null. Return valid JSON with a facts array.`,
         },
         {
           role: "user",

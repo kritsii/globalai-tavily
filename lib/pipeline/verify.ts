@@ -14,14 +14,38 @@ const VerificationStatusSchema = z.enum([
 ]);
 
 const SentenceCheckSchema = z.object({
-  sentenceId: z.string().min(1),
-  status: VerificationStatusSchema,
+  id: z.string().min(1),
+  verdict: VerificationStatusSchema,
   reason: z.string().trim().min(1),
 });
 
 const VerificationResponseSchema = z.object({
   checks: z.array(SentenceCheckSchema),
 });
+
+function normalizeVerificationResponse(value: unknown): unknown {
+  if (Array.isArray(value)) return { checks: value };
+  if (typeof value !== "object" || value === null) return value;
+
+  const response = value as Record<string, unknown>;
+  if (Array.isArray(response.checks)) return response;
+  for (const key of ["results", "verdicts", "claims"]) {
+    if (Array.isArray(response[key])) {
+      return { ...response, checks: response[key] };
+    }
+  }
+  return value;
+}
+
+function isVerificationValidationError(error: unknown): boolean {
+  return (
+    error instanceof z.ZodError ||
+    (error instanceof Error &&
+      /model response (?:failed schema validation|is not valid JSON)|model returned an empty response/i.test(
+        error.message,
+      ))
+  );
+}
 
 const CleanedSentenceSchema = z.object({
   text: z.string().trim().min(1),
@@ -93,7 +117,7 @@ function hasExpectedCheckIds(
   checks: z.infer<typeof SentenceCheckSchema>[],
   expectedIds: string[],
 ): boolean {
-  const receivedIds = checks.map(({ sentenceId }) => sentenceId);
+  const receivedIds = checks.map(({ id }) => id);
   return (
     receivedIds.length === expectedIds.length &&
     new Set(receivedIds).size === expectedIds.length &&
@@ -125,8 +149,8 @@ export async function verifyBrief(
     const citedFacts = location.factIds.map((id) => factById.get(id));
     if (citedFacts.some((fact) => !fact)) {
       localChecks.set(sentenceId, {
-        sentenceId,
-        status: "unsupported",
+        id: sentenceId,
+        verdict: "unsupported",
         reason: "One or more cited fact IDs do not exist.",
       });
       return;
@@ -137,8 +161,8 @@ export async function verifyBrief(
     );
     if (citedSources.length === 0 || citedSources.some((source) => !source)) {
       localChecks.set(sentenceId, {
-        sentenceId,
-        status: "unsupported",
+        id: sentenceId,
+        verdict: "unsupported",
         reason: "Cited facts have no available source snippets.",
       });
       return;
@@ -159,28 +183,52 @@ export async function verifyBrief(
     const model = process.env.MODEL_STRONG?.trim();
     if (!model) throw new Error("MODEL_STRONG is not configured.");
 
-    const { data } = await chatJson(
-      model,
-      [
-        {
-          role: "system",
-          content:
-            "Verify each sentence using ONLY its provided cited snippets. Do not use prior knowledge. Mark supported only when the snippets directly support the full sentence; mark partial when they support only part of it; mark unsupported when they do not support it. Give a concise reason based only on the snippets. Return valid JSON with exactly one check for every sentenceId, preserving its exact ID.",
-        },
-        {
-          role: "user",
-          content: JSON.stringify({ sentences: modelInputs }),
-        },
-      ],
-      VerificationResponseSchema,
-      { stats, maxCompletionTokens: 1_200 },
-    );
+    for (let offset = 0; offset < modelInputs.length; offset += 10) {
+      const batch = modelInputs.slice(offset, offset + 10);
+      const expectedIds = batch.map(({ sentenceId }) => sentenceId);
+      const BatchResponseSchema = z
+        .preprocess(normalizeVerificationResponse, VerificationResponseSchema)
+        .superRefine(({ checks }, context) => {
+          if (!hasExpectedCheckIds(checks, expectedIds)) {
+            context.addIssue({
+              code: "custom",
+              message: "Every sentence id must appear exactly once in checks.",
+              path: ["checks"],
+            });
+          }
+        });
 
-    const expectedIds = modelInputs.map(({ sentenceId }) => sentenceId);
-    if (!hasExpectedCheckIds(data.checks, expectedIds)) {
-      throw new Error("Verifier response did not contain exactly one check per sentence.");
+      try {
+        const { data } = await chatJson(
+          model,
+          [
+            {
+              role: "system",
+              content:
+                'Verify each sentence using ONLY its provided cited snippets. Do not use prior knowledge. Mark supported only when the snippets directly support the full sentence; mark partial when they support only part of it; mark unsupported when they do not support it. Give a concise reason based only on the snippets. Return ONLY a JSON object with a top-level key \'checks\'. Never return a bare array. Never rename the key. Use exactly this shape: {"checks":[{"id":"<sentence id>","verdict":"supported","reason":"<short>"}]}. The verdict must be "supported", "partial", or "unsupported". Every sentence id I send must appear exactly once in checks.',
+            },
+            {
+              role: "user",
+              content: JSON.stringify({ sentences: batch }),
+            },
+          ],
+          BatchResponseSchema,
+          { stats, maxCompletionTokens: 1_200 },
+        );
+
+        data.checks.forEach((check) => modelChecks.set(check.id, check));
+      } catch (error) {
+        if (!isVerificationValidationError(error)) throw error;
+        const reason = "Verifier response failed validation; dropped for safety.";
+        for (const sentenceId of expectedIds) {
+          modelChecks.set(sentenceId, {
+            id: sentenceId,
+            verdict: "unsupported",
+            reason,
+          });
+        }
+      }
     }
-    data.checks.forEach((check) => modelChecks.set(check.sentenceId, check));
   }
 
   const allChecks = new Map([...localChecks, ...modelChecks]);
@@ -198,7 +246,7 @@ export async function verifyBrief(
     const check = allChecks.get(sentenceId);
     if (!check) throw new Error(`Missing verification result for ${sentenceId}.`);
 
-    if (check.status === "unsupported") {
+    if (check.verdict === "unsupported") {
       stats.droppedClaims.push({
         text: location.sentence,
         reason: check.reason,
@@ -210,7 +258,7 @@ export async function verifyBrief(
       text: location.sentence,
       factIds: location.factIds,
       ...(location.date ? { date: location.date } : {}),
-      ...(check.status === "partial"
+      ...(check.verdict === "partial"
         ? { verificationStatus: "partial" as const }
         : {}),
     });
