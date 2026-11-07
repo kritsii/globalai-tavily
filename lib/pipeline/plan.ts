@@ -68,7 +68,7 @@ export async function planSearchQueries(
       {
         role: "system",
         content:
-          'Return valid JSON shaped as {"queries":[{"category":"firm_news","query":"..."}]}. Create 6 to 10 distinct, directly searchable queries and include every category exactly as spelled here: "firm_news", "new_investments", "partner_posts_interviews", "portfolio_news", "thesis_statements", "sector_competitors". Each query category must be exactly one of those six values; do not invent, rename, or abbreviate categories. Every query must quote the full firm name exactly. Tailor queries to the selected investor and startup. For sector competitors, search for companies in the sector without asserting or inventing competitor names.',
+          'Return valid JSON shaped as {"queries":[{"category":"firm_news","query":"..."}]}. Create 6 to 10 distinct, directly searchable queries and include every category exactly as spelled here: "firm_news", "new_investments", "partner_posts_interviews", "portfolio_news", "thesis_statements", "sector_competitors". Each query category must be exactly one of those six values; do not invent, rename, or abbreviate categories. Every query must quote the selected candidate full name exactly, whether it is a firm or an individual partner. Tailor queries to the selected investor and startup. For sector competitors, search for companies in the sector without asserting or inventing competitor names.',
       },
       {
         role: "user",
@@ -98,6 +98,11 @@ export async function planSearchQueries(
     ),
   }));
   const targetedQueries = [
+    SearchQuerySchema.parse({
+      category: "firm_news",
+      query: `"${selectedCandidate.name}" (launch OR launched OR hire OR hires OR hired OR departure OR departed OR announcement OR announced OR news)`,
+      topic: "news",
+    }),
     SearchQuerySchema.parse({
       category: "thesis_statements",
       query: `"${selectedCandidate.name}" "Requests for Startups" OR thesis OR "focus areas"`,

@@ -22,22 +22,21 @@ const CitedSentenceSchema = z.object({
   factIds: z.array(z.string().min(1)),
   verificationStatus: z.literal("partial").optional(),
   backgroundDate: z.string().optional(),
+  date: z.string().date().optional(),
+  contextField: z.enum(["sector", "stage", "raiseSize"]).optional(),
 });
 
 const ClientFinalizedBriefSchema = z.object({
   brief: z.object({
     atAGlance: z.array(CitedSentenceSchema),
-    whatLookingForNow: z.array(CitedSentenceSchema),
-    dealTermsAndProcess: z.array(CitedSentenceSchema),
+    recentSignals: z.object({
+      items: z.array(CitedSentenceSchema.extend({ date: z.string().date() })),
+    }),
     fitWithStartup: z.object({
       verdict: z.enum(["Strong", "Partial", "Weak", "Not enough evidence"]),
       reasons: z.array(CitedSentenceSchema),
     }),
-    recentSignals: z.object({
-      items: z.array(CitedSentenceSchema),
-      background: CitedSentenceSchema.nullable(),
-    }),
-    conversationStarters: z.array(CitedSentenceSchema),
+    openQuestions: z.array(CitedSentenceSchema).length(3),
   }),
   facts: z.array(
     FactSchema.extend({
@@ -71,6 +70,17 @@ const emptyStats: RunStats = {
 };
 
 type Screen = "new" | "matches" | "brief" | "library";
+type FormFields = {
+  investor: string;
+  entityType: "firm" | "person";
+  meetingAt: string;
+  meetingType: string;
+  oneLiner: string;
+  sector: string;
+  stage: string;
+  raiseSize: string;
+};
+
 type LibraryItem = {
   id: string;
   candidate: Candidate;
@@ -81,8 +91,9 @@ type LibraryItem = {
 
 export default function PitchsideWorkspace() {
   const [screen, setScreen] = useState<Screen>("new");
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<FormFields>({
     investor: "",
+    entityType: "firm",
     meetingAt: "",
     meetingType: "Intro",
     oneLiner: "",
@@ -161,7 +172,10 @@ export default function PitchsideWorkspace() {
       const response = await fetch("/api/resolve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ investor: requestInput.investor }),
+        body: JSON.stringify({
+          investor: requestInput.investor,
+          entityType: form.entityType,
+        }),
       });
       const body: unknown = await response.json();
       if (!response.ok) {
@@ -471,16 +485,6 @@ export default function PitchsideWorkspace() {
   );
 }
 
-type FormFields = {
-  investor: string;
-  meetingAt: string;
-  meetingType: string;
-  oneLiner: string;
-  sector: string;
-  stage: string;
-  raiseSize: string;
-};
-
 function NewBriefScreen({
   error,
   form,
@@ -523,16 +527,30 @@ function NewBriefScreen({
               </div>
             </div>
             <label className="field">
-              <span>Investor, firm, or partner</span>
+              <span>Investor firm or person</span>
               <input
-                autoComplete="organization"
+                autoComplete={form.entityType === "firm" ? "organization" : "name"}
                 onChange={(event) => updateForm("investor", event.target.value)}
-                placeholder="e.g. Northstar Ventures"
+                placeholder={
+                  form.entityType === "firm"
+                    ? "e.g. Northstar Ventures"
+                    : "e.g. Alex Morgan"
+                }
                 required
                 value={form.investor}
               />
             </label>
             <div className="field-grid">
+              <label className="field">
+                <span>Meeting with</span>
+                <select
+                  onChange={(event) => updateForm("entityType", event.target.value)}
+                  value={form.entityType}
+                >
+                  <option value="firm">Firm</option>
+                  <option value="person">Person / partner</option>
+                </select>
+              </label>
               <label className="field">
                 <span>Date &amp; time</span>
                 <input

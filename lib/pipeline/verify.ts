@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { chatJson, createRunStats } from "@/lib/llm";
-import type { Candidate, RunStats } from "@/types";
+import type { BriefInput, Candidate, RunStats } from "@/types";
 import {
+  BriefInputSchema,
   FactSchema,
   SourceSchema,
   type Fact,
@@ -9,14 +10,13 @@ import {
 } from "@/types";
 import {
   getDateWindow,
-  getTwelveMonthCutoff,
   isBlocklistedDomain,
   isWithinDateRange,
   matchesDomain,
 } from "@/lib/source-quality";
 import {
   CitedSentenceSchema,
-  FitVerdictSchema,
+  OpenQuestionSchema,
   SynthesisBriefSchema,
   type SynthesisBrief,
 } from "@/lib/pipeline/synthesize";
@@ -31,69 +31,48 @@ const VerificationResponseSchema = z.object({
   checks: z.array(SentenceCheckSchema),
 });
 
-function normalizeVerificationResponse(value: unknown): unknown {
-  if (Array.isArray(value)) return { checks: value };
-  if (typeof value !== "object" || value === null) return value;
-  const response = value as Record<string, unknown>;
-  if (Array.isArray(response.checks)) return response;
-  for (const key of ["results", "verdicts", "claims"]) {
-    if (Array.isArray(response[key])) return { ...response, checks: response[key] };
-  }
-  return value;
-}
-
-function isVerificationValidationError(error: unknown): boolean {
-  return (
-    error instanceof z.ZodError ||
-    (error instanceof Error &&
-      /model response (?:failed schema validation|is not valid JSON)|model returned an empty response/i.test(
-        error.message,
-      ))
-  );
-}
-
 const CleanedSentenceSchema = CitedSentenceSchema.extend({
   verificationStatus: z.literal("partial").optional(),
   backgroundDate: z.string().optional(),
 });
 
+const CleanedRecentSignalSchema = CleanedSentenceSchema.extend({
+  date: z.string().date(),
+});
+
 export const CleanedBriefSchema = z.object({
-  atAGlance: z.array(CleanedSentenceSchema),
-  whatLookingForNow: z.array(CleanedSentenceSchema),
-  dealTermsAndProcess: z.array(CleanedSentenceSchema),
+  atAGlance: z.array(CleanedSentenceSchema).max(2),
+  recentSignals: z.object({ items: z.array(CleanedRecentSignalSchema).max(5) }),
   fitWithStartup: z.object({
-    verdict: FitVerdictSchema,
-    reasons: z.array(CleanedSentenceSchema),
+    verdict: z.enum(["Strong", "Partial", "Weak", "Not enough evidence"]),
+    reasons: z.array(CleanedSentenceSchema).max(2),
   }),
-  recentSignals: z.object({
-    items: z.array(CleanedSentenceSchema),
-    background: CleanedSentenceSchema.nullable(),
-  }),
-  conversationStarters: z.array(CleanedSentenceSchema),
+  openQuestions: z.array(OpenQuestionSchema).length(3),
 });
 
 export type CleanedBrief = z.infer<typeof CleanedBriefSchema>;
 
 type Section =
   | "atAGlance"
-  | "whatLookingForNow"
-  | "dealTermsAndProcess"
-  | "fitWithStartup"
   | "recentSignals"
-  | "recentSignalsBackground"
-  | "conversationStarters";
+  | "fitWithStartup"
+  | "openQuestions";
 
 type SentenceLocation = {
   id: string;
   section: Section;
   sentence: string;
   factIds: string[];
+  contextField?: z.infer<typeof OpenQuestionSchema>["contextField"];
+  date?: string;
 };
 
-const rollingYearClaimPattern =
-  /\b(?:last|past|previous)\s+(?:12|twelve)\s+months?\b|\b(?:last|past)\s+year\b/i;
-const currentYearClaimPattern =
-  /\b(?:this|current)\s+(?:(?:calendar|fiscal)\s+)?year\b|\byear[- ]to[- ]date\b|\bYTD\b/i;
+const dedupePriority: Section[] = [
+  "recentSignals",
+  "fitWithStartup",
+  "atAGlance",
+  "openQuestions",
+];
 
 function isBackgroundSource(
   source: Source,
@@ -118,7 +97,11 @@ function collectSentences(brief: SynthesisBrief): SentenceLocation[] {
   const locations: SentenceLocation[] = [];
   const addEntries = (
     section: Section,
-    entries: Array<{ text: string; factIds: string[] }>,
+    entries: Array<{
+      text: string;
+      factIds: string[];
+      contextField?: z.infer<typeof OpenQuestionSchema>["contextField"];
+    }>,
   ) => {
     for (const entry of entries) {
       for (const sentence of splitSentences(entry.text)) {
@@ -127,43 +110,52 @@ function collectSentences(brief: SynthesisBrief): SentenceLocation[] {
           section,
           sentence,
           factIds: entry.factIds,
+          ...(entry.contextField ? { contextField: entry.contextField } : {}),
         });
       }
     }
   };
   addEntries("atAGlance", brief.atAGlance);
-  addEntries("whatLookingForNow", brief.whatLookingForNow);
-  addEntries("dealTermsAndProcess", brief.dealTermsAndProcess);
-  addEntries("fitWithStartup", brief.fitWithStartup.reasons);
   addEntries("recentSignals", brief.recentSignals.items);
-  if (brief.recentSignals.background) {
-    addEntries("recentSignalsBackground", [brief.recentSignals.background]);
-  }
-  addEntries("conversationStarters", brief.conversationStarters);
+  addEntries("fitWithStartup", brief.fitWithStartup.reasons);
+  addEntries("openQuestions", brief.openQuestions);
   return locations;
 }
 
-function expectedIdsMatch(
-  checks: z.infer<typeof SentenceCheckSchema>[],
-  ids: string[],
+function questionMentionsContext(
+  text: string,
+  field: NonNullable<SentenceLocation["contextField"]>,
+  briefInput: BriefInput,
 ): boolean {
-  const received = checks.map(({ id }) => id);
-  return (
-    received.length === ids.length &&
-    new Set(received).size === ids.length &&
-    ids.every((id) => received.includes(id))
-  );
+  const value = briefInput.startup[field].trim();
+  return value.length > 0 && text.toLocaleLowerCase().includes(value.toLocaleLowerCase());
 }
 
-const dedupePriority: Section[] = [
-  "recentSignals",
-  "recentSignalsBackground",
-  "whatLookingForNow",
-  "dealTermsAndProcess",
-  "fitWithStartup",
-  "atAGlance",
-  "conversationStarters",
-];
+function contextQuestions(briefInput: BriefInput) {
+  return [
+    {
+      text: `What evidence would demonstrate demand in ${briefInput.startup.sector}?`,
+      factIds: [],
+      contextField: "sector" as const,
+    },
+    {
+      text: `Which milestones matter most for a ${briefInput.startup.stage} company?`,
+      factIds: [],
+      contextField: "stage" as const,
+    },
+    {
+      text: `What milestones would best support a ${briefInput.startup.raiseSize} raise?`,
+      factIds: [],
+      contextField: "raiseSize" as const,
+    },
+  ];
+}
+
+function truncateWords(text: string, maximum = 20): string {
+  const words = text.trim().split(/\s+/);
+  if (words.length <= maximum) return text.trim();
+  return `${words.slice(0, maximum).join(" ").replace(/[.,;:!?]+$/, "")}…`;
+}
 
 export async function verifyBrief(
   brief: SynthesisBrief,
@@ -172,51 +164,42 @@ export async function verifyBrief(
   candidate: Pick<Candidate, "officialDomain">,
   meetingAt: string,
   stats: RunStats = createRunStats(),
+  briefInput: BriefInput,
 ): Promise<CleanedBrief> {
   const validatedBrief = SynthesisBriefSchema.parse(brief);
   const validatedFacts = z.array(FactSchema).parse(facts);
   const validatedSources = z.array(SourceSchema).parse(sources);
+  const input = BriefInputSchema.parse(briefInput);
   const factById = new Map(validatedFacts.map((fact) => [fact.id, fact]));
   const sourceById = new Map(validatedSources.map((source) => [source.id, source]));
   const { startDate, endDate } = getDateWindow(meetingAt);
-  const twelveMonthCutoff = getTwelveMonthCutoff(meetingAt);
-  const factSourceIds = new Set(
-    validatedFacts.flatMap((fact) => fact.sourceIds),
-  );
-  const newestBackgroundDate = validatedSources
-    .filter(
-      (source) =>
-        factSourceIds.has(source.id) &&
-        source.publishedAt !== null &&
-        source.publishedAt < startDate &&
-        matchesDomain(source.domain, candidate.officialDomain),
-    )
-    .reduce<string | null>(
-      (newest, source) =>
-        source.publishedAt && (!newest || source.publishedAt > newest)
-          ? source.publishedAt
-          : newest,
-      null,
-    );
   const locations = collectSentences(validatedBrief);
   const localChecks = new Map<string, z.infer<typeof SentenceCheckSchema>>();
   const modelInputs: Array<{
     id: string;
     sentence: string;
     section: Section;
-    snippets: Array<{
-      sourceId: string;
-      snippet: string;
-      publishedAt: string;
-      background: boolean;
-      blocklisted: boolean;
-    }>;
+    snippets: Array<{ sourceId: string; snippet: string; publishedAt: string }>;
   }> = [];
 
   for (const location of locations) {
+    if (location.section === "openQuestions" && location.factIds.length === 0) {
+      const field = location.contextField;
+      const mentionsContext =
+        field && questionMentionsContext(location.sentence, field, input);
+      localChecks.set(location.id, {
+        id: location.id,
+        verdict: mentionsContext ? "supported" : "unsupported",
+        reason: mentionsContext
+          ? "Question is tied to a supplied startup field."
+          : "Question is not tied to a cited fact or supplied startup context.",
+      });
+      continue;
+    }
+
     const citedFacts = location.factIds.map((id) => factById.get(id));
-    const citedSources = citedFacts.flatMap((fact) =>
-      fact?.sourceIds.map((sourceId) => sourceById.get(sourceId)) ?? [],
+    const citedSources = citedFacts.flatMap(
+      (fact) => fact?.sourceIds.map((sourceId) => sourceById.get(sourceId)) ?? [],
     );
     const resolvedSources = citedSources.filter(
       (source): source is Source => source !== undefined,
@@ -224,6 +207,7 @@ export async function verifyBrief(
     let reason: string | undefined;
 
     if (
+      location.factIds.length === 0 ||
       citedFacts.some((fact) => !fact) ||
       resolvedSources.length === 0 ||
       resolvedSources.length !== citedSources.length
@@ -235,17 +219,11 @@ export async function verifyBrief(
           !source.publishedAt ||
           source.publishedAt > endDate ||
           (source.publishedAt < startDate &&
-            !matchesDomain(source.domain, candidate.officialDomain)),
+            (location.section !== "atAGlance" ||
+              !matchesDomain(source.domain, candidate.officialDomain))),
       )
     ) {
       reason = "A cited source is undated or outside the permitted date window.";
-    } else if (
-      location.section === "whatLookingForNow" &&
-      resolvedSources.some(
-        (source) => !matchesDomain(source.domain, candidate.officialDomain),
-      )
-    ) {
-      reason = "Current focus claims must cite the locked firm's domain.";
     } else if (
       location.section === "recentSignals" &&
       resolvedSources.some(
@@ -254,59 +232,19 @@ export async function verifyBrief(
           !isWithinDateRange(source.publishedAt, startDate, endDate),
       )
     ) {
-      reason = "Recent signals must be supported by sources in the 30-day window.";
+      reason = "Last 30 days items must cite sources published within the 30-day window.";
     } else if (
-      location.section === "recentSignalsBackground" &&
-      resolvedSources.some(
-        (source) =>
-          !isBackgroundSource(source, startDate, candidate.officialDomain),
-      )
+      location.section === "recentSignals" &&
+      resolvedSources.some((source) => isBlocklistedDomain(source.domain))
     ) {
-      reason = "The older recent-signal item must be dated background from the firm.";
+      reason = "A blocklisted domain cannot support a recent signal.";
     } else if (
-      location.section === "recentSignalsBackground" &&
-      newestBackgroundDate &&
-      !resolvedSources.some(
-        (source) => source.publishedAt === newestBackgroundDate,
-      )
-    ) {
-      reason = "The background signal must be the newest older sourced item.";
-    } else if (
+      location.section !== "atAGlance" &&
       resolvedSources.some((source) =>
         isBackgroundSource(source, startDate, candidate.officialDomain),
-      ) &&
-      ![
-        "atAGlance",
-        "whatLookingForNow",
-        "recentSignalsBackground",
-      ].includes(location.section)
-    ) {
-      reason = "Background facts are not allowed in this section.";
-    } else if (
-      (location.section === "recentSignals" ||
-        location.section === "recentSignalsBackground") &&
-      resolvedSources.every((source) => isBlocklistedDomain(source.domain))
-    ) {
-      reason = "A blocklisted domain cannot be the only support for a claim.";
-    } else if (
-      rollingYearClaimPattern.test(location.sentence) &&
-      !resolvedSources.some(
-        (source) =>
-          source.publishedAt !== null &&
-          isWithinDateRange(source.publishedAt, twelveMonthCutoff, endDate),
       )
     ) {
-      reason = "A rolling-year claim requires a source published within that period.";
-    } else if (
-      currentYearClaimPattern.test(location.sentence) &&
-      !resolvedSources.some(
-        (source) =>
-          source.publishedAt !== null &&
-          source.publishedAt.startsWith(endDate.slice(0, 4)) &&
-          source.publishedAt <= endDate,
-      )
-    ) {
-      reason = "A current-year claim requires a source published during that year.";
+      reason = "Older official facts may appear only as Background in At a glance.";
     }
 
     if (reason) {
@@ -322,12 +260,6 @@ export async function verifyBrief(
           sourceId: source.id,
           snippet: source.snippet,
           publishedAt: source.publishedAt!,
-          background: isBackgroundSource(
-            source,
-            startDate,
-            candidate.officialDomain,
-          ),
-          blocklisted: isBlocklistedDomain(source.domain),
         })),
       });
     }
@@ -340,51 +272,49 @@ export async function verifyBrief(
     for (let offset = 0; offset < modelInputs.length; offset += 10) {
       const batch = modelInputs.slice(offset, offset + 10);
       const expectedIds = batch.map(({ id }) => id);
-      const BatchSchema = z
-        .preprocess(normalizeVerificationResponse, VerificationResponseSchema)
-        .superRefine(({ checks }, context) => {
-          if (!expectedIdsMatch(checks, expectedIds)) {
+      const BatchSchema = VerificationResponseSchema.superRefine(
+        ({ checks }, context) => {
+          const received = checks.map(({ id }) => id);
+          if (
+            received.length !== expectedIds.length ||
+            new Set(received).size !== expectedIds.length ||
+            expectedIds.some((id) => !received.includes(id))
+          ) {
             context.addIssue({
               code: "custom",
               message: "Every sentence id must appear exactly once in checks.",
               path: ["checks"],
             });
           }
-        });
-      try {
-        const { data } = await chatJson(
-          model,
-          [
-            {
-              role: "system",
-              content:
-                'Verify each sentence using only its cited snippets. A blocklisted domain cannot be the only support. Mark supported only when snippets support the full sentence; partial when only part is supported; otherwise unsupported. Return ONLY {"checks":[{"id":"<sentence id>","verdict":"supported","reason":"<short>"}]}. Never return a bare array or rename the key. Every supplied id must appear exactly once.',
-            },
-            { role: "user", content: JSON.stringify({ sentences: batch }) },
-          ],
-          BatchSchema,
-          { stats, maxCompletionTokens: 1_200 },
-        );
-        data.checks.forEach((check) => modelChecks.set(check.id, check));
-      } catch (error) {
-        if (!isVerificationValidationError(error)) throw error;
-        for (const id of expectedIds) {
-          modelChecks.set(id, {
-            id,
-            verdict: "unsupported",
-            reason: "Verifier response failed validation; dropped for safety.",
-          });
-        }
-      }
+        },
+      );
+      const { data } = await chatJson(
+        model,
+        [
+          {
+            role: "system",
+            content:
+              'Verify each brief bullet using only its cited snippets. Mark supported only when snippets support the full bullet; partial when only part is supported; otherwise unsupported. Return ONLY {"checks":[{"id":"<sentence id>","verdict":"supported","reason":"<short>"}]}. Every supplied id must appear exactly once.',
+          },
+          { role: "user", content: JSON.stringify({ sentences: batch }) },
+        ],
+        BatchSchema,
+        { stats, maxCompletionTokens: 1_000 },
+      );
+      data.checks.forEach((check) => modelChecks.set(check.id, check));
     }
   }
 
   const checks = new Map([...localChecks, ...modelChecks]);
-  const accepted = new Map<string, {
-    location: SentenceLocation;
-    verdict: "supported" | "partial";
-    backgroundDate?: string;
-  }>();
+  const accepted = new Map<
+    string,
+    {
+      location: SentenceLocation;
+      verdict: "supported" | "partial";
+      backgroundDate?: string;
+      date?: string;
+    }
+  >();
   const orderedLocations = [...locations].sort(
     (left, right) =>
       dedupePriority.indexOf(left.section) -
@@ -426,6 +356,14 @@ export async function verifyBrief(
           .filter((date): date is string => date !== null),
       ),
     ];
+    const signalDate =
+      location.section === "recentSignals"
+        ? relatedSources
+            .map((source) => source.publishedAt)
+            .filter((date): date is string => date !== null)
+            .sort()
+            .at(-1)
+        : undefined;
     for (const factId of location.factIds) usedFactIds.add(factId);
     accepted.set(location.id, {
       location,
@@ -433,6 +371,7 @@ export async function verifyBrief(
       ...(backgroundDates.length
         ? { backgroundDate: backgroundDates.join(", ") }
         : {}),
+      ...(signalDate ? { date: signalDate } : {}),
     });
   }
 
@@ -441,32 +380,74 @@ export async function verifyBrief(
       if (location.section !== section) return [];
       const item = accepted.get(location.id);
       if (!item) return [];
-      return [{
-        text: location.sentence,
-        factIds: location.factIds,
-        ...(item.backgroundDate ? { backgroundDate: item.backgroundDate } : {}),
-        ...(item.verdict === "partial"
-          ? { verificationStatus: "partial" as const }
-          : {}),
-      }];
+      return [
+        {
+          text: location.sentence,
+          factIds: location.factIds,
+          ...(item.backgroundDate ? { backgroundDate: item.backgroundDate } : {}),
+          ...(item.date ? { date: item.date } : {}),
+          ...(item.verdict === "partial"
+            ? { verificationStatus: "partial" as const }
+            : {}),
+          ...(location.contextField
+            ? { contextField: location.contextField }
+            : {}),
+        },
+      ];
     });
-  const fitReasons = entriesFor("fitWithStartup");
 
+  const openQuestions = entriesFor("openQuestions").slice(0, 3);
+  const usedContextFields = new Set(
+    openQuestions.flatMap((question) =>
+      question.contextField ? [question.contextField] : [],
+    ),
+  );
+  for (const question of contextQuestions(input)) {
+    if (openQuestions.length === 3) break;
+    if (
+      !usedContextFields.has(question.contextField) &&
+      !openQuestions.some((item) => item.text === question.text)
+    ) {
+      openQuestions.push(question);
+      usedContextFields.add(question.contextField);
+    }
+  }
+  const usedQuestions = new Set(openQuestions.map((question) => question.text));
+  for (const question of contextQuestions(input)) {
+    if (openQuestions.length === 3) break;
+    const fallback = {
+      ...question,
+      text: truncateWords(`${question.text.replace(/\?$/, "")} for this startup?`),
+    };
+    if (!usedQuestions.has(fallback.text)) {
+      openQuestions.push(fallback);
+      usedQuestions.add(fallback.text);
+    }
+  }
+
+  const fitReasons = entriesFor("fitWithStartup").slice(0, 2);
   return CleanedBriefSchema.parse({
-    atAGlance: entriesFor("atAGlance"),
-    whatLookingForNow: entriesFor("whatLookingForNow"),
-    dealTermsAndProcess: entriesFor("dealTermsAndProcess"),
+    atAGlance: entriesFor("atAGlance")
+      .slice(0, 2)
+      .map((entry) => ({ ...entry, text: truncateWords(entry.text) })),
+    recentSignals: {
+      items: entriesFor("recentSignals")
+        .slice(0, 5)
+        .map((entry) => ({ ...entry, text: truncateWords(entry.text) })),
+    },
     fitWithStartup: {
       verdict:
-        fitReasons.length < 2
+        fitReasons.length === 0
           ? "Not enough evidence"
           : validatedBrief.fitWithStartup.verdict,
-      reasons: fitReasons,
+      reasons: fitReasons.map((entry) => ({
+        ...entry,
+        text: truncateWords(entry.text),
+      })),
     },
-    recentSignals: {
-      items: entriesFor("recentSignals"),
-      background: entriesFor("recentSignalsBackground")[0] ?? null,
-    },
-    conversationStarters: entriesFor("conversationStarters"),
+    openQuestions: openQuestions.map((entry) => ({
+      ...entry,
+      text: truncateWords(entry.text),
+    })),
   });
 }

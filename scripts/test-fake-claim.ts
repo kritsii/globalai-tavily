@@ -13,8 +13,7 @@ async function main() {
       { text: fakeClaim, factIds: ["F1"] },
       { text: "Peak XV Partners is a venture capital firm.", factIds: ["F1"] },
     ],
-    whatLookingForNow: [],
-    dealTermsAndProcess: [],
+    recentSignals: { items: [] },
     fitWithStartup: {
       verdict: "Not enough evidence",
       reasons: [
@@ -22,8 +21,23 @@ async function main() {
         { text: "Its focus needs further research.", factIds: ["F1"] },
       ],
     },
-    recentSignals: { items: [], background: null },
-    conversationStarters: [],
+    openQuestions: [
+      {
+        text: "What evidence would demonstrate demand in climate tech?",
+        factIds: [],
+        contextField: "sector",
+      },
+      {
+        text: "Which milestones matter most for a seed company?",
+        factIds: [],
+        contextField: "stage",
+      },
+      {
+        text: "What milestones would best support a $2M raise?",
+        factIds: [],
+        contextField: "raiseSize",
+      },
+    ],
   } satisfies SynthesisBrief;
   const facts = [
     {
@@ -54,6 +68,17 @@ async function main() {
     { officialDomain: "peakxv.com" },
     "2026-11-07T00:00:00.000Z",
     stats,
+    {
+      investor: "Peak XV Partners",
+      meetingAt: "2026-11-07T00:00:00.000Z",
+      meetingType: "Intro",
+      startup: {
+        oneLiner: "Climate software",
+        sector: "climate tech",
+        stage: "seed",
+        raiseSize: "$2M",
+      },
+    },
   );
   const fakeClaimWasDropped = stats.droppedClaims.some(
     ({ text }) => text === fakeClaim,

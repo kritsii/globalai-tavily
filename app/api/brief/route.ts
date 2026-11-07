@@ -161,6 +161,7 @@ export async function POST(request: Request) {
             runContext.candidate,
             runContext.briefInput.meetingAt,
             stats,
+            runContext.briefInput,
           );
           if (cancelled) return;
           checkBudget();

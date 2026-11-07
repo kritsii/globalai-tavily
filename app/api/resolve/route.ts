@@ -5,6 +5,7 @@ import { CandidateSchema } from "@/types";
 
 const RequestSchema = z.object({
   investor: z.string().trim().min(1).max(200),
+  entityType: z.enum(["firm", "person"]).default("firm"),
 });
 
 const ResultSchema = z.object({
@@ -47,14 +48,20 @@ export async function POST(request: Request) {
     );
   }
 
-  const investor = parsedRequest.data.investor;
+  const { investor, entityType } = parsedRequest.data;
 
   try {
     const client = tavily({ apiKey });
-    const queries = [
-      `"${investor}" official website`,
-      `"${investor}" firm partners leadership`,
-    ];
+    const queries =
+      entityType === "person"
+        ? [
+            `"${investor}" investor partner official profile`,
+            `"${investor}" venture capital firm partner`,
+          ]
+        : [
+            `"${investor}" official website`,
+            `"${investor}" firm partners leadership`,
+          ];
     const responses = await Promise.all(
       queries.map((query) => client.search(query, { maxResults: 8 })),
     );
@@ -93,11 +100,11 @@ export async function POST(request: Request) {
         {
           role: "system",
           content:
-            'Resolve the investor name using only the supplied Tavily search results. Return JSON shaped as {"candidates":[{"type":"firm","name":"...","officialDomain":"...","descriptor":"...","matchScore":0.0,"evidenceUrls":["https://..."]}]}, with at most three candidates. type must be exactly "firm", "partner", or "other". Include only these candidate fields. Never invent people, firms, official domains, descriptors, or evidence URLs. Use a candidate only when the results support its identity. officialDomain must be the domain of a supplied result that represents the candidate\'s official website. Each candidate must cite one or more exact result URLs in evidenceUrls. Use an empty candidate array if the results do not support a reliable match. matchScore must be a number from 0 to 1.',
+            `Resolve the investor ${entityType === "person" ? "person" : "firm"} using only the supplied Tavily results. Return JSON shaped as {"candidates":[{"type":"firm","name":"...","officialDomain":"...","descriptor":"...","matchScore":0.0,"evidenceUrls":["https://..."]}]}, with at most three candidates. type must be exactly "firm", "partner", or "other". For a person, return type "partner" only when a supplied source supports that person's investor role and association with the firm domain. Never invent people, firms, official domains, descriptors, or evidence URLs. Use a candidate only when results support its identity. officialDomain must be the domain of a supplied result representing the candidate's official firm website or profile. Each candidate must cite one or more exact result URLs in evidenceUrls. Use an empty candidate array if results do not support a reliable match. matchScore must be a number from 0 to 1.`,
         },
         {
           role: "user",
-          content: JSON.stringify({ investor, searchResults: results }),
+          content: JSON.stringify({ investor, entityType, searchResults: results }),
         },
       ],
       ResultSchema,

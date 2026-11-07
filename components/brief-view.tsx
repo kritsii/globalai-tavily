@@ -48,6 +48,7 @@ function Citation({
 function CitedSentence({
   entry,
   finalized,
+  showConfidence = false,
 }: {
   entry: {
     text: string;
@@ -55,13 +56,28 @@ function CitedSentence({
     verificationStatus?: "partial";
     date?: string;
     backgroundDate?: string;
+    contextField?: "sector" | "stage" | "raiseSize";
   };
   finalized: FinalizedBrief;
+  showConfidence?: boolean;
 }) {
+  const supportingFacts = entry.factIds
+    .map((factId) => finalized.facts.find((fact) => fact.id === factId))
+    .filter((fact) => fact !== undefined);
+  const isVerified =
+    supportingFacts.length > 0 &&
+    supportingFacts.every((fact) => fact.confidence === "Confirmed");
+
   return (
-    <p className="brief-sentence">
+    <>
       {entry.date && <time className="timeline-date">{entry.date}</time>}
       <span>{entry.text}</span>
+      <Citation factIds={entry.factIds} finalized={finalized} />
+      {showConfidence && (
+        <span className={`confidence-tag ${isVerified ? "verified" : "single-source"}`}>
+          {isVerified ? "Verified" : "Single-source"}
+        </span>
+      )}
       {entry.verificationStatus === "partial" && (
         <span className="partial-badge">Partial</span>
       )}
@@ -70,50 +86,52 @@ function CitedSentence({
           Background · {entry.backgroundDate}
         </span>
       )}
-      <Citation factIds={entry.factIds} finalized={finalized} />
-    </p>
+    </>
   );
 }
 
-function BriefSection({
-  title,
-  entries,
-  finalized,
-  emptyText,
-}: {
-  title: string;
-  entries: Array<{
-    text: string;
-    factIds: string[];
-    verificationStatus?: "partial";
-    date?: string;
-    backgroundDate?: string;
-  }>;
-  finalized: FinalizedBrief;
-  emptyText?: string;
-}) {
-  if (entries.length === 0 && !emptyText) return null;
+function truncateWords(text: string, maximum = 20): string {
+  const words = text.trim().split(/\s+/);
+  if (words.length <= maximum) return text.trim();
+  return `${words.slice(0, maximum).join(" ").replace(/[.,;:!?]+$/, "")}…`;
+}
 
+function DownloadIcon() {
   return (
-    <section className="document-section">
-      <h3>{title}</h3>
-      {entries.length ? (
-        entries.map((entry, index) => (
-          <CitedSentence
-            entry={entry}
-            finalized={finalized}
-            key={`${title}-${entry.date ?? index}-${entry.text}`}
-          />
-        ))
-      ) : (
-        <p className="empty-section">{emptyText}</p>
-      )}
-    </section>
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M10 2.5v9m0 0 3.5-3.5M10 11.5 6.5 8M3.5 14.5v2h13v-2"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
   );
 }
 
 export default function BriefView({ candidateName, finalized, stats }: Props) {
-  const { brief, sources, facts, gaps, stalenessWarning } = finalized;
+  const { brief, sources, facts, gaps } = finalized;
+  const briefFactIds = new Set([
+    ...brief.atAGlance.flatMap((entry) => entry.factIds),
+    ...brief.recentSignals.items.flatMap((entry) => entry.factIds),
+    ...brief.fitWithStartup.reasons.flatMap((entry) => entry.factIds),
+    ...brief.openQuestions.flatMap((entry) => entry.factIds),
+  ]);
+  const uncertainFacts = facts.filter(
+    (fact) =>
+      fact.confidence === "Single-source" && briefFactIds.has(fact.id),
+  );
+  const gapLines = [
+    ...gaps.slice(0, 3).map((gap) => ({
+      text: truncateWords(gap.description, 14),
+      factIds: [],
+    })),
+    ...uncertainFacts.map((fact) => ({
+      text: truncateWords(`Single-source: ${fact.claim}`, 14),
+      factIds: [fact.id],
+    })),
+  ].slice(0, 3);
 
   return (
     <main className="workspace-main brief-workspace">
@@ -122,21 +140,14 @@ export default function BriefView({ candidateName, finalized, stats }: Props) {
           <p className="eyebrow">Investor brief</p>
           <h1>Meeting prep, with receipts.</h1>
           <p className="page-subtitle">
-            Research on {candidateName} · {facts.length} sourced facts
+            {candidateName} · {facts.length} sourced facts · {sources.length} sources
           </p>
         </div>
         <button className="button button-secondary" onClick={() => window.print()}>
           <DownloadIcon />
-          Export brief
+          Print A4 brief
         </button>
       </div>
-
-      {stalenessWarning && (
-        <div className="warning-banner" role="status">
-          <span aria-hidden="true">◷</span>
-          {stalenessWarning}
-        </div>
-      )}
 
       <div className="brief-layout">
         <aside className="brief-rail">
@@ -155,14 +166,7 @@ export default function BriefView({ candidateName, finalized, stats }: Props) {
               <span>Topics to explore</span>
               <strong>{gaps.length}</strong>
             </div>
-            <div className="confidence-legend">
-              <span className="confidence-dot confirmed" />
-              Confirmed · 2+ domains
-              <span className="confidence-dot single" />
-              Single source
-            </div>
           </section>
-
           <section className="panel rail-panel stats-panel">
             <p className="panel-label">RUN STATS</p>
             <div className="metric-row">
@@ -173,182 +177,114 @@ export default function BriefView({ candidateName, finalized, stats }: Props) {
               <span>Latency</span>
               <strong>{(stats.latencyMs / 1000).toFixed(1)}s</strong>
             </div>
-            <div className="metric-row">
-              <span>Fallbacks</span>
-              <strong>{stats.fallbacks}</strong>
-            </div>
           </section>
-
-          {gaps.length > 0 && (
-            <section className="panel rail-panel gap-panel">
-              <p className="panel-label">RESEARCH GAPS</p>
-              {gaps.map((gap) => (
-                <p className="gap-item" key={gap.topic}>
-                  <span aria-hidden="true">↗</span>
-                  {gap.topic} not found in sources searched
-                </p>
-              ))}
-            </section>
-          )}
         </aside>
 
         <article className="brief-document">
           <div className="document-topline">
             <span>PITCHSIDE / FIELD NOTES</span>
-            <span>PRIVATE &middot; SOURCE-BACKED</span>
+            <span>PRIVATE · SOURCE-BACKED</span>
           </div>
           <h2 className="document-title">{candidateName}</h2>
           <p className="document-kicker">INVESTOR MEETING BRIEF</p>
 
-          <BriefSection title="At a glance" entries={brief.atAGlance} finalized={finalized} />
-          <BriefSection
-            title="What they're looking for now"
-            entries={brief.whatLookingForNow}
-            finalized={finalized}
-            emptyText="No current focus, Requests for Startups, or thesis facts found on the firm's domain."
-          />
-          <BriefSection
-            title="Deal terms and process"
-            entries={brief.dealTermsAndProcess}
-            finalized={finalized}
-            emptyText="No sourced deal terms or process details found."
-          />
+          <section className="document-section">
+            <h3>At a glance</h3>
+            {brief.atAGlance.length ? (
+              brief.atAGlance.slice(0, 2).map((entry, index) => (
+                <p className="brief-sentence" key={`${entry.text}-${index}`}>
+                  <CitedSentence entry={entry} finalized={finalized} />
+                </p>
+              ))
+            ) : (
+              <p className="empty-section">No concise background facts found in sources searched.</p>
+            )}
+          </section>
+
+          <section className="document-section">
+            <h3>Last 30 days</h3>
+            {brief.recentSignals.items.length ? (
+              <ul className="recent-signal-list">
+                {brief.recentSignals.items.slice(0, 5).map((entry, index) => (
+                  <li className="recent-signal" key={`${entry.date}-${index}`}>
+                    <CitedSentence
+                      entry={entry}
+                      finalized={finalized}
+                      showConfidence
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-section">No dated launches, hires, departures, announcements, or news found in-window.</p>
+            )}
+          </section>
+
           <section className="document-section">
             <h3>Fit with your startup</h3>
             <p className="fit-verdict">
-              <strong>Verdict:</strong> {brief.fitWithStartup.verdict}
+              <strong>{brief.fitWithStartup.verdict}</strong>
             </p>
             {brief.fitWithStartup.reasons.length ? (
               <ul className="fit-reasons">
-                {brief.fitWithStartup.reasons.map((reason, index) => (
+                {brief.fitWithStartup.reasons.slice(0, 2).map((reason, index) => (
                   <li key={`${reason.text}-${index}`}>
-                    <CitedSentence entry={reason} finalized={finalized} />
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="empty-section">
-                Not enough sourced evidence to compare the submitted sector, stage, and raise size.
-              </p>
-            )}
-          </section>
-          <section className="document-section">
-            <h3>Recent signals</h3>
-            {brief.recentSignals.items.length ? (
-              brief.recentSignals.items.map((entry, index) => (
-                <CitedSentence
-                  entry={entry}
-                  finalized={finalized}
-                  key={`${entry.text}-${index}`}
-                />
-              ))
-            ) : (
-              <p className="empty-section">
-                No dated updates in the last 30 days
-              </p>
-            )}
-            {brief.recentSignals.background && (
-              <CitedSentence
-                entry={{
-                  ...brief.recentSignals.background,
-                  backgroundDate:
-                    brief.recentSignals.background.backgroundDate ??
-                    finalized.facts
-                      .filter((fact) =>
-                        brief.recentSignals.background?.factIds.includes(fact.id),
-                      )
-                      .flatMap((fact) => fact.sourceIds)
-                      .map((sourceId) =>
-                        sources.find((source) => source.id === sourceId)?.publishedAt,
-                      )
-                      .filter((date): date is string => date !== null && date !== undefined)
-                      .join(", "),
-                }}
-                finalized={finalized}
-              />
-            )}
-          </section>
-          <BriefSection
-            title="Conversation starters"
-            entries={brief.conversationStarters}
-            finalized={finalized}
-          />
-          <section className="document-section">
-            <h3>Gaps</h3>
-            {gaps.length ? (
-              <ul className="gap-list">
-                {gaps.map((gap) => (
-                  <li key={gap.topic}>
-                    <strong>{gap.topic}:</strong> {gap.description}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="empty-section">No major research gaps identified.</p>
-            )}
-          </section>
-        </article>
-
-        <aside className="brief-rail source-rail">
-          <section className="panel rail-panel sources-panel">
-            <div className="source-heading">
-              <p className="panel-label">SOURCES</p>
-              <span className="source-count">{sources.length}</span>
-            </div>
-            <ol className="source-list">
-              {sources.map((source) => (
-                <li id={`source-${source.number}`} key={source.id}>
-                  <a
-                    className="source-link"
-                    href={source.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <span className="source-number">{source.number}</span>
-                    <span className="source-copy">
-                      <strong>{source.title}</strong>
-                      <span>
-                        {source.domain}
-                        {source.publishedAt ? ` · ${source.publishedAt}` : ""}
-                        {source.background ? " · Background" : ""}
-                      </span>
+                    <span className="brief-sentence">
+                      <CitedSentence entry={reason} finalized={finalized} />
                     </span>
-                    <ExternalIcon />
-                  </a>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-section">Not enough sourced evidence to compare the submitted startup fields.</p>
+            )}
+          </section>
+
+          <section className="document-section">
+            <h3>Open questions</h3>
+            <ol className="open-question-list">
+              {brief.openQuestions.slice(0, 3).map((question, index) => (
+                <li className="brief-sentence" key={`${question.text}-${index}`}>
+                  <CitedSentence entry={question} finalized={finalized} />
                 </li>
               ))}
             </ol>
           </section>
-        </aside>
+
+          <section className="document-section">
+            <h3>Gaps and uncertain</h3>
+            {gapLines.length ? (
+              <ul className="gap-list">
+                {gapLines.map((gap, index) => (
+                  <li className="brief-sentence" key={`${gap.text}-${index}`}>
+                    <CitedSentence entry={gap} finalized={finalized} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty-section">No significant research gaps surfaced.</p>
+            )}
+          </section>
+
+          <section className="document-section sources-section">
+            <h3>Sources</h3>
+            <ol className="print-source-list">
+              {sources.map((source) => (
+                <li id={`source-${source.number}`} key={source.id}>
+                  <span className="source-number">{source.number}</span>
+                  <span className="source-copy">
+                    <strong>{truncateWords(source.title, 10)}</strong>
+                    <span>
+                      {source.domain}
+                      {source.publishedAt ? ` · ${source.publishedAt}` : ""}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        </article>
       </div>
     </main>
-  );
-}
-
-function DownloadIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path
-        d="M10 2.5v9m0 0 3.5-3.5M10 11.5 6.5 8M3.5 14.5v2h13v-2"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.5"
-      />
-    </svg>
-  );
-}
-
-function ExternalIcon() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M6 3.5h6.5V10M12 4 6.5 9.5M11 9.5v3h-7v-7h3"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.3"
-      />
-    </svg>
   );
 }
