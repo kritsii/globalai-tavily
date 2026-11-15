@@ -1002,14 +1002,7 @@ button:disabled {
 }
 
 .recent-signal .brief-sentence {
-  flex-wrap: nowrap;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.recent-signal .brief-sentence > span:nth-child(2) {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  margin: 3px 0;
 }
 
 .confidence-tag {
@@ -1625,9 +1618,18 @@ button:disabled {
     line-height: 1.15;
   }
 
+  /* One line per signal on paper; full text wraps on screen. */
   .recent-signal .brief-sentence {
+    flex-wrap: nowrap;
     gap: 1mm;
+    overflow: hidden;
     white-space: nowrap;
+  }
+
+  .recent-signal .brief-sentence > span:nth-child(2) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .timeline-date,
@@ -3194,5 +3196,331 @@ button:disabled {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* =============================================================================
+   SAMPLE BRIEF (/demo)
+   Restored from before the V4 redesign, which removed these rules and left
+   components/demo-brief.tsx unstyled.
+   ============================================================================= */
+
+.sample-brief__topline,
+.sample-brief__kicker,
+.sample-confidence,
+.sample-brief__sources small {
+  font-family: var(--font-ibm-plex-mono), monospace;
+}
+
+.sample-brief {
+  width: min(730px, 100%);
+  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: clamp(18px, 4vw, 38px);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+  text-align: left;
+}
+
+.sample-brief__topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+
+.sample-brief > h3 {
+  margin: 25px 0 2px;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.06em;
+}
+
+.sample-brief__kicker {
+  margin: 0;
+  color: var(--accent-strong);
+  font-size: 11px;
+  letter-spacing: 0.11em;
+}
+
+.sample-brief__section {
+  margin-top: 19px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.sample-brief__section h4,
+.sample-brief__sources h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sample-brief__section p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.sample-brief__context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin: 15px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sample-brief__context strong {
+  width: 100%;
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.sample-brief__context span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--surface);
+}
+
+.sample-brief__section ul,
+.sample-brief__section ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.sample-brief__section li {
+  padding-left: 3px;
+}
+
+.sample-brief__section .sample-empty {
+  border-left: 2px solid var(--accent);
+  padding-left: 12px;
+  color: var(--muted);
+}
+
+.sample-gaps {
+  color: var(--muted) !important;
+}
+
+.sample-fit ul {
+  margin-top: 5px;
+}
+
+.sample-citation {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 4px;
+  padding: 0 4px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.sample-confidence {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.sample-verdict {
+  display: inline-block;
+  margin: 0 0 7px;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 11px;
+}
+
+.sample-muted {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.sample-brief__sources {
+  margin-top: 22px;
+  border-top: 1px solid var(--border);
+  padding-top: 13px;
+}
+
+.sample-brief__sources ol {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sample-brief__sources li {
+  min-width: 0;
+}
+
+.sample-brief__sources a {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 16px;
+  align-items: start;
+  gap: 8px;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px;
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.sample-brief__sources a:hover {
+  border-color: var(--accent);
+}
+
+.sample-brief__sources a > span {
+  color: var(--accent-strong);
+  font-family: var(--font-ibm-plex-mono), monospace;
+}
+
+.sample-brief__sources .sample-source__number {
+  padding-top: 1px;
+}
+
+.sample-brief__sources .sample-source__copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sample-brief__sources .sample-source__copy strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sample-brief__sources small {
+  width: auto;
+  padding-left: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.sample-brief__sources .sample-source__copy > span {
+  color: var(--muted);
+  font-family: var(--font-space-grotesk), sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.sample-brief__sources .sample-source__arrow {
+  color: var(--muted);
+}
+
+.sample-brief__note {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.demo-page {
+  width: min(850px, calc(100% - 36px));
+  margin: 0 auto;
+  padding: 54px 0 80px;
+}
+
+.demo-page__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 27px;
+}
+
+.demo-page__heading .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.demo-page__heading h1 {
+  margin: 0;
+  font-size: clamp(30px, 4vw, 44px);
+  letter-spacing: -0.06em;
+}
+
+.demo-page__heading p:last-child {
+  max-width: 560px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+@media (max-width: 560px) {
+  .sample-brief__topline {
+    font-size: 8px;
+  }
+
+  .sample-brief__sources ol {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-page__heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+/* Landing example brief: make clear the sheets are mock-ups, not live output. */
+.mockup-disclaimer {
+  margin: 14px auto 0;
+  max-width: 600px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-muted);
+}
+
+.mockup-disclaimer a {
+  color: var(--forest-green);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.mockup-badge {
+  border: 1px solid var(--manila-text);
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: var(--manila-tab);
+  color: var(--manila-text);
+}
+
+.mockup-badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .dossier-top-bar {
+    flex-wrap: wrap;
+    row-gap: 10px;
   }
 }

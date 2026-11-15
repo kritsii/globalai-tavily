@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { chatJson } from "@/lib/llm";
+import { stripInternalIdMarkers } from "@/lib/utils";
 import {
   FactSchema,
   SourceSchema,
@@ -42,7 +43,7 @@ export async function extractFacts(
         {
           role: "system",
           content:
-            `The subject is ${candidate.name} (${candidate.officialDomain}). Ignore any source about a different organization with a similar name. If sources are about another entity, return no facts. Extract at most one concise factual claim per source, strictly from the provided snippets. Use ONLY those snippets; do not use prior knowledge, infer unsupported details, or add facts. Each fact must cite the exact sourceId that supports it. If a snippet does not support a clear fact, omit it. Set date to a date explicitly stated in the snippet, otherwise null. Return valid JSON with a facts array.`,
+            `The subject is ${candidate.name} (${candidate.officialDomain}). Ignore any source about a different organization with a similar name. If sources are about another entity, return no facts. Extract at most one concise factual claim per source, strictly from the provided snippets. When a snippet supports several facts, prefer the one most useful for meeting prep: investment focus or thesis, stages and check sizes, recent investments, launches, hires or departures. Use ONLY those snippets; do not use prior knowledge, infer unsupported details, or add facts. Each fact must cite the exact sourceId that supports it. If a snippet does not support a clear fact, omit it. Set date to a date explicitly stated in the snippet, otherwise null. Return valid JSON with a facts array.`,
         },
         {
           role: "user",
@@ -65,6 +66,7 @@ export async function extractFacts(
       facts.push(
         FactSchema.parse({
           ...fact,
+          claim: stripInternalIdMarkers(fact.claim),
           id: `F${facts.length + 1}`,
         }),
       );

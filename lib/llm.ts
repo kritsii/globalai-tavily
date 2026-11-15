@@ -70,6 +70,39 @@ function isTransientLLMError(error: unknown): boolean {
   );
 }
 
+const MAX_RETRY_WAIT_MS = 30_000;
+
+function secondsToMs(value: string | undefined | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number.parseFloat(value);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+}
+
+// Rate-limited providers say how long to wait, either in a Retry-After header
+// or, for Gemini's OpenAI-compatible API, only in the message ("Please retry
+// in 26.8s" / "retryDelay":"26s"). A fixed 1–2 s backoff retried too early and
+// failed the whole brief on free-tier quotas.
+function getProviderRetryDelayMs(error: unknown): number | undefined {
+  if (!(error instanceof OpenAI.APIError)) return undefined;
+  const headerMs = Number.parseFloat(error.headers?.get("retry-after-ms") ?? "");
+  if (Number.isFinite(headerMs) && headerMs >= 0) return headerMs;
+  const headerSeconds = secondsToMs(error.headers?.get("retry-after"));
+  if (headerSeconds !== undefined) return headerSeconds;
+
+  const message = error.message;
+  return secondsToMs(
+    message.match(/retry in ([\d.]+)\s*s/i)?.[1] ??
+      message.match(/"retryDelay"\s*:\s*"([\d.]+)s"/)?.[1],
+  );
+}
+
+function getRetryDelayMs(error: unknown, attempt: number): number {
+  const providerDelay = getProviderRetryDelayMs(error);
+  const delay =
+    providerDelay !== undefined ? providerDelay + 500 : 1000 * 2 ** attempt;
+  return Math.min(delay, MAX_RETRY_WAIT_MS);
+}
+
 async function retryTransientRequest<T>(request: () => Promise<T>): Promise<T> {
   const maxRetries = 2;
 
@@ -78,7 +111,11 @@ async function retryTransientRequest<T>(request: () => Promise<T>): Promise<T> {
       return await request();
     } catch (error) {
       if (!isTransientLLMError(error) || attempt >= maxRetries) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+      const delay = getRetryDelayMs(error, attempt);
+      console.warn(
+        `LLM request rate-limited or unavailable; retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${maxRetries}).`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
 }

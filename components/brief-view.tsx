@@ -159,12 +159,12 @@ export default function BriefView({ candidateName, finalized, stats }: Props) {
               <strong>{sources.length}</strong>
             </div>
             <div className="metric-row">
-              <span>Verified facts</span>
+              <span>Facts found</span>
               <strong>{facts.length}</strong>
             </div>
             <div className="metric-row">
-              <span>Topics to explore</span>
-              <strong>{gaps.length}</strong>
+              <span>Gaps &amp; uncertain</span>
+              <strong>{gapLines.length}</strong>
             </div>
           </section>
           <section className="panel rail-panel stats-panel">
@@ -207,11 +207,13 @@ export default function BriefView({ candidateName, finalized, stats }: Props) {
               <ul className="recent-signal-list">
                 {brief.recentSignals.items.slice(0, 5).map((entry, index) => (
                   <li className="recent-signal" key={`${entry.date}-${index}`}>
-                    <CitedSentence
-                      entry={entry}
-                      finalized={finalized}
-                      showConfidence
-                    />
+                    <span className="brief-sentence">
+                      <CitedSentence
+                        entry={entry}
+                        finalized={finalized}
+                        showConfidence
+                      />
+                    </span>
                   </li>
                 ))}
               </ul>

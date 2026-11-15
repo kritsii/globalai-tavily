@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { z } from "zod";
 import BriefView from "@/components/brief-view";
@@ -115,13 +115,6 @@ export default function PitchsideWorkspace() {
   const [pipelineStage, setPipelineStage] = useState("");
   const [sourceCount, setSourceCount] = useState<number | null>(null);
   const [factCount, setFactCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    const savedTheme = window.localStorage.getItem("pitchside-theme");
-    if (savedTheme === "light" || savedTheme === "dark") {
-      document.documentElement.dataset.theme = savedTheme;
-    }
-  }, []);
 
   const currentLibraryItem = library.find(
     (item) => item.id === activeLibraryId,
@@ -376,15 +369,6 @@ export default function PitchsideWorkspace() {
             <span className="tavily-badge__dot" />
             Search by Tavily
           </span>
-          <button
-            aria-label="Toggle light and dark theme"
-            className="theme-toggle"
-            onClick={toggleTheme}
-            title="Toggle theme"
-            type="button"
-          >
-            <ThemeIcon />
-          </button>
         </div>
       </header>
 
@@ -473,8 +457,6 @@ export default function PitchsideWorkspace() {
             <div className="settings-list">
               <span>Research provider</span>
               <strong>Search by Tavily</strong>
-              <span>Theme preference</span>
-              <strong>System default, with manual override</strong>
               <span>Brief budget</span>
               <strong>Configured by workspace environment</strong>
             </div>
@@ -905,15 +887,6 @@ function StepProgress({ step }: { step: number }) {
   );
 }
 
-function toggleTheme() {
-  const root = document.documentElement;
-  const currentTheme =
-    root.dataset.theme ??
-    (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-  root.dataset.theme = currentTheme === "dark" ? "light" : "dark";
-  window.localStorage.setItem("pitchside-theme", root.dataset.theme);
-}
-
 function BrandIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -923,20 +896,6 @@ function BrandIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth="2"
-      />
-    </svg>
-  );
-}
-
-function ThemeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="3.5" stroke="currentColor" strokeWidth="1.6" />
-      <path
-        d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.6"
       />
     </svg>
   );

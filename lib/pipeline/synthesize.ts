@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { chatJson } from "@/lib/llm";
-import { getDateWindow, isWithinDateRange } from "@/lib/source-quality";
+import {
+  getDateWindow,
+  isWithinDateRange,
+  matchesDomain,
+} from "@/lib/source-quality";
+import { stripInternalIdMarkers } from "@/lib/utils";
 import {
   BriefInputSchema,
   FactSchema,
@@ -90,9 +95,10 @@ function normalizeBareSentences(value: unknown): unknown {
   return normalized;
 }
 
-function truncateWords(text: string, maximum = 20): string {
-  const words = text.trim().split(/\s+/);
-  if (words.length <= maximum) return text.trim();
+function truncateWords(rawText: string, maximum = 20): string {
+  const text = stripInternalIdMarkers(rawText);
+  const words = text.split(/\s+/);
+  if (words.length <= maximum) return text;
   return `${words.slice(0, maximum).join(" ").replace(/[.,;:!?]+$/, "")}…`;
 }
 
@@ -171,7 +177,7 @@ export async function synthesizeBrief(
       {
         role: "system",
         content:
-          `Create a compact investor brief using only the supplied facts and startup fields; never assume any founder detail beyond those fields. Return JSON shaped as {"atAGlance":[{"text":"...","factIds":["F1"]}],"recentSignals":{"items":[{"text":"...","factIds":["F2"]}]},"fitWithStartup":{"verdict":"Partial","reasons":[{"text":"...","factIds":["F3"]}]},"openQuestions":[{"text":"...","factIds":["F4"]},{"text":"...","factIds":[],"contextField":"sector"},{"text":"...","factIds":[],"contextField":"stage"}]}. Use at most 2 atAGlance sentences, at most 5 recentSignals items, at most 2 fit reasons, and exactly 3 open questions. Every bullet or question must be at most 20 words. Keep recent signal items to one short dated-event claim each; code will attach the source publication date. Include only items with cited sources published within the 30 days ending ${endDate}; never move older items into this section. Older facts may appear only in atAGlance and only when a cited source is on the subject's official domain; these are labeled Background by the application. Do not duplicate facts between sections. Every fact-based sentence must cite its exact factIds. An open question must cite a relevant fact or identify contextField as one of sector, stage, or raiseSize and explicitly mention that submitted value. Fit reasons must compare only the supplied sector, stage, and raise size to sourced investor evidence; do not infer missing founder details. If evidence is insufficient, say so in the verdict and reasons. Gaps and source list are rendered separately. Keep every item concise and return valid JSON only.`,
+          `Create a compact investor brief using only the supplied facts and startup fields; never assume any founder detail beyond those fields. Return JSON shaped as {"atAGlance":[{"text":"...","factIds":["F1"]}],"recentSignals":{"items":[{"text":"...","factIds":["F2"]}]},"fitWithStartup":{"verdict":"Partial","reasons":[{"text":"...","factIds":["F3"]}]},"openQuestions":[{"text":"...","factIds":["F4"]},{"text":"...","factIds":[],"contextField":"sector"},{"text":"...","factIds":[],"contextField":"stage"}]}. Use at most 2 atAGlance sentences, at most 5 recentSignals items, at most 2 fit reasons, and exactly 3 open questions. Every bullet or question must be at most 20 words. Keep recent signal items to one short dated-event claim each; code will attach the source publication date. Include only items with cited sources published within the 30 days ending ${endDate}; never move older items into this section. Older facts may appear only in atAGlance or fitWithStartup, and only when every cited source is on the subject's official domain (for example a published thesis or standard deal); these are labeled Background by the application. Do not repeat the same fact in both atAGlance and recentSignals. Fit reasons and open questions may cite facts used elsewhere, but must add comparison or a question rather than restating them. Every fact-based sentence must cite its exact factIds in the factIds array only; never write fact IDs such as [F1] inside text. An open question must cite a relevant fact or identify contextField as one of sector, stage, or raiseSize and explicitly mention that submitted value. Fit reasons must compare only the supplied sector, stage, and raise size to sourced investor evidence; do not infer missing founder details. If evidence is insufficient, say so in the verdict and reasons. Gaps and source list are rendered separately. Keep every item concise and return valid JSON only.`,
       },
       {
         role: "user",
@@ -197,21 +203,46 @@ export async function synthesizeBrief(
     { stats, maxCompletionTokens: 1_100 },
   );
 
-  const inWindow = (factIds: string[]) => {
-    const citedSources = factIds.flatMap(
+  const citedSourcesFor = (factIds: string[]) =>
+    factIds.flatMap(
       (factId) =>
         factById.get(factId)?.sourceIds
           .map((sourceId) => sourceById.get(sourceId))
           .filter((source): source is Source => source !== undefined) ?? [],
     );
+  const isInWindow = (source: Source) =>
+    source.publishedAt !== null &&
+    isWithinDateRange(source.publishedAt, startDate, endDate);
+  const inWindow = (factIds: string[]) => {
+    const citedSources = citedSourcesFor(factIds);
+    return citedSources.length > 0 && citedSources.every(isInWindow);
+  };
+  // Fit reasons usually rest on a published thesis, which is rarely from the
+  // last 30 days. Allow older sources only from the investor's own domain;
+  // verify.ts labels them Background.
+  const inWindowOrOfficial = (factIds: string[]) => {
+    const citedSources = citedSourcesFor(factIds);
     return (
       citedSources.length > 0 &&
       citedSources.every(
         (source) =>
-          source.publishedAt !== null &&
-          isWithinDateRange(source.publishedAt, startDate, endDate),
+          isInWindow(source) ||
+          (source.publishedAt !== null &&
+            source.publishedAt <= endDate &&
+            matchesDomain(source.domain, candidate.officialDomain)),
       )
     );
+  };
+
+  // Record out-of-window items instead of dropping them silently, so every
+  // removed sentence is visible in stats.droppedClaims.
+  const keepIf = (
+    allowed: (factIds: string[]) => boolean,
+    reason: string,
+  ) => (entry: { text: string; factIds: string[] }) => {
+    if (allowed(entry.factIds)) return true;
+    stats?.droppedClaims.push({ text: entry.text, reason });
+    return false;
   };
 
   const openQuestions = data.openQuestions
@@ -231,7 +262,12 @@ export async function synthesizeBrief(
       .map((entry) => ({ ...entry, text: truncateWords(entry.text) })),
     recentSignals: {
       items: data.recentSignals.items
-        .filter((entry) => inWindow(entry.factIds))
+        .filter(
+          keepIf(
+            inWindow,
+            "Last 30 days items must cite sources published within the 30-day window.",
+          ),
+        )
         .slice(0, 5)
         .map((entry) => ({
           ...entry,
@@ -241,7 +277,12 @@ export async function synthesizeBrief(
     fitWithStartup: {
       verdict: data.fitWithStartup.verdict,
       reasons: data.fitWithStartup.reasons
-        .filter((entry) => inWindow(entry.factIds))
+        .filter(
+          keepIf(
+            inWindowOrOfficial,
+            "Fit reasons must cite in-window sources or the investor's own site.",
+          ),
+        )
         .slice(0, 2)
         .map((entry) => ({ ...entry, text: truncateWords(entry.text) })),
     },

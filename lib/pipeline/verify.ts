@@ -87,10 +87,42 @@ function isBackgroundSource(
   );
 }
 
+// Older pages from the investor's own domain (thesis, standard deal) may
+// support background context and fit reasons, never recent signals.
+function backgroundAllowed(section: Section): boolean {
+  return section === "atAGlance" || section === "fitWithStartup";
+}
+
+// Words that end in a period without ending the sentence ("Nov. 13", "Acme Inc.").
+const NON_TERMINAL_WORDS = new Set([
+  "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov",
+  "dec", "inc", "corp", "co", "ltd", "llc", "mr", "mrs", "ms", "dr", "st", "jr",
+  "sr", "vs", "etc", "approx", "no", "e.g", "i.e", "u.s", "u.k",
+]);
+
+// Split only where a new sentence clearly starts: terminal punctuation, then
+// whitespace, then a capital letter, and not after an abbreviation or initial.
+// A naive split on every period cut "published an essay on Nov. 13 …" in two.
+// "At a glance" and "Last 30 days" restate facts, so each fact appears in at
+// most one of them. Fit reasons and open questions analyse those same facts
+// (one fact can support several reasons or questions), so they may reuse them.
+function isSummarySection(section: Section): boolean {
+  return section === "atAGlance" || section === "recentSignals";
+}
+
 function splitSentences(text: string): string[] {
-  return (text.match(/[^.!?]+(?:[.!?]+["')\]]*|$)/g) ?? [])
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
+  const sentences: string[] = [];
+  let start = 0;
+  for (const match of text.matchAll(/[.!?]+["')\]]*\s+(?=["'([]?[A-Z])/g)) {
+    const lastWord = text.slice(start, match.index).split(/\s+/).at(-1) ?? "";
+    const word = lastWord.replace(/^["'([]+/, "").toLowerCase();
+    if (NON_TERMINAL_WORDS.has(word) || /^[a-z]$/.test(word)) continue;
+    const end = match.index + match[0].length;
+    sentences.push(text.slice(start, end).trim());
+    start = end;
+  }
+  sentences.push(text.slice(start).trim());
+  return sentences.filter(Boolean);
 }
 
 function collectSentences(brief: SynthesisBrief): SentenceLocation[] {
@@ -219,7 +251,7 @@ export async function verifyBrief(
           !source.publishedAt ||
           source.publishedAt > endDate ||
           (source.publishedAt < startDate &&
-            (location.section !== "atAGlance" ||
+            (!backgroundAllowed(location.section) ||
               !matchesDomain(source.domain, candidate.officialDomain))),
       )
     ) {
@@ -239,12 +271,13 @@ export async function verifyBrief(
     ) {
       reason = "A blocklisted domain cannot support a recent signal.";
     } else if (
-      location.section !== "atAGlance" &&
+      !backgroundAllowed(location.section) &&
       resolvedSources.some((source) =>
         isBackgroundSource(source, startDate, candidate.officialDomain),
       )
     ) {
-      reason = "Older official facts may appear only as Background in At a glance.";
+      reason =
+        "Older official facts may appear only as Background in At a glance or Fit.";
     }
 
     if (reason) {
@@ -294,9 +327,12 @@ export async function verifyBrief(
           {
             role: "system",
             content:
-              'Verify each brief bullet using only its cited snippets. Mark supported only when snippets support the full bullet; partial when only part is supported; otherwise unsupported. Return ONLY {"checks":[{"id":"<sentence id>","verdict":"supported","reason":"<short>"}]}. Every supplied id must appear exactly once.',
+              'Verify each brief bullet using only its cited snippets. Mark supported only when snippets support the full bullet; partial when only part is supported; otherwise unsupported. Bullets in section "fitWithStartup" compare the investor with the founder\'s startup: treat statements about the startup as supported when they match the supplied startup fields, but every claim about the investor must still be supported by the snippets. Return ONLY {"checks":[{"id":"<sentence id>","verdict":"supported","reason":"<short>"}]}. Every supplied id must appear exactly once.',
           },
-          { role: "user", content: JSON.stringify({ sentences: batch }) },
+          {
+            role: "user",
+            content: JSON.stringify({ startup: input.startup, sentences: batch }),
+          },
         ],
         BatchSchema,
         { stats, maxCompletionTokens: 1_000 },
@@ -325,10 +361,10 @@ export async function verifyBrief(
   for (const location of orderedLocations) {
     const check = checks.get(location.id);
     if (!check) throw new Error(`Missing verification result for ${location.id}.`);
-    if (
-      check.verdict === "unsupported" ||
-      location.factIds.some((factId) => usedFactIds.has(factId))
-    ) {
+    const isDuplicate =
+      isSummarySection(location.section) &&
+      location.factIds.some((factId) => usedFactIds.has(factId));
+    if (check.verdict === "unsupported" || isDuplicate) {
       stats.droppedClaims.push({
         text: location.sentence,
         reason:
@@ -364,7 +400,9 @@ export async function verifyBrief(
             .sort()
             .at(-1)
         : undefined;
-    for (const factId of location.factIds) usedFactIds.add(factId);
+    if (isSummarySection(location.section)) {
+      for (const factId of location.factIds) usedFactIds.add(factId);
+    }
     accepted.set(location.id, {
       location,
       verdict: check.verdict,

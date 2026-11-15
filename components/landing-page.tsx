@@ -36,17 +36,17 @@ const profilesData: Record<"stripe" | "nvidia" | "sequoia" | "linear", BriefProf
       {
         headline: "Released Agentic Payments Toolkit allowing autonomous AI agents to initiate governed transactions.",
         date: "Oct 27, 2026",
-        source: "Stripe Newsroom",
+        source: "Example source",
       },
       {
         headline: "Crossed $1T annualized total payment volume run-rate across global enterprise merchants.",
         date: "Nov 05, 2026",
-        source: "Reuters Financial",
+        source: "Example source",
       },
       {
         headline: "Confirmed Bridge stablecoin rails will integrate directly into core merchant checkout APIs.",
         date: "Nov 11, 2026",
-        source: "Colossus Interview #412",
+        source: "Example source",
       },
     ],
     talkAbout: [
@@ -80,17 +80,17 @@ const profilesData: Record<"stripe" | "nvidia" | "sequoia" | "linear", BriefProf
       {
         headline: "Delivered first commercial Blackwell NVL72 liquid-cooled racks to sovereign datacenter customers.",
         date: "Oct 24, 2026",
-        source: "Nvidia Press",
+        source: "Example source",
       },
       {
         headline: "Announced NIM microservices expansion for real-time edge robotics orchestration.",
         date: "Nov 03, 2026",
-        source: "VentureBeat AI",
+        source: "Example source",
       },
       {
         headline: "Reported 140% YoY datacenter revenue growth driven by multi-agent reasoning workloads.",
         date: "Nov 09, 2026",
-        source: "SEC EDGAR 10-Q Filing",
+        source: "Example source",
       },
     ],
     talkAbout: [
@@ -124,17 +124,17 @@ const profilesData: Record<"stripe" | "nvidia" | "sequoia" | "linear", BriefProf
       {
         headline: "Published research manifesto: 'The Act Two of Software Agents: From Prompts to Pipelines.'",
         date: "Oct 20, 2026",
-        source: "Sequoia Perspectives",
+        source: "Example source",
       },
       {
         headline: "Co-led $180M growth round in autonomous software verification and synthetic testing infrastructure.",
         date: "Nov 02, 2026",
-        source: "TechCrunch",
+        source: "Example source",
       },
       {
         headline: "Hosted European AI Founder Summit in London emphasizing defensibility against model commoditization.",
         date: "Nov 08, 2026",
-        source: "Bloomberg Technology",
+        source: "Example source",
       },
     ],
     talkAbout: [
@@ -168,17 +168,17 @@ const profilesData: Record<"stripe" | "nvidia" | "sequoia" | "linear", BriefProf
       {
         headline: "Shipped Linear Asks 2.0 with AI auto-triage and bi-directional Slack resolution.",
         date: "Oct 22, 2026",
-        source: "Linear Changelog",
+        source: "Example source",
       },
       {
         headline: "Launched Customer Requests syncing external enterprise tickets into internal engineering cycles.",
         date: "Nov 04, 2026",
-        source: "Product Hunt",
+        source: "Example source",
       },
       {
         headline: "Expanded custom SOC2 and enterprise compliance controls for enterprise customer migrations.",
         date: "Nov 10, 2026",
-        source: "Linear Enterprise",
+        source: "Example source",
       },
     ],
     talkAbout: [
@@ -279,7 +279,7 @@ export default function LandingPage() {
               </h1>
 
               <p className="hero-paragraph">
-                Tell us who you're meeting and when. We'll catch you up on what
+                Tell us who you&rsquo;re meeting and when. We&rsquo;ll catch you up on what
                 matters and give you questions worth asking.
               </p>
 
@@ -416,10 +416,15 @@ export default function LandingPage() {
         <section className="example-brief-section" id="example-brief">
           <div className="section-container">
             <div className="section-header-block">
-              <span className="section-kicker">EXAMPLE BRIEF</span>
-              <h2 className="section-heading">Everything you need. Nothing you don't.</h2>
+              <span className="section-kicker">EXAMPLE BRIEF · MOCK-UP</span>
+              <h2 className="section-heading">Everything you need. Nothing you don&apos;t.</h2>
               <p className="section-subheading">
                 A clean, one-page brief formatted for rapid retention. Read it on desktop or print it on paper.
+              </p>
+              <p className="mockup-disclaimer">
+                These sheets show the layout with made-up example data, not real research.
+                Real Pitchside briefs cite live, clickable sources.{" "}
+                <Link href="/demo">See a sample with real sources →</Link>
               </p>
             </div>
 
@@ -509,7 +514,7 @@ export default function LandingPage() {
                     <span className="dossier-id">REF: PS-{profile.name.toUpperCase()}</span>
                   </div>
                   <div className="dossier-right">
-                    <span className="dossier-spec">A4 FORMAT · ONE PAGE</span>
+                    <span className="dossier-spec mockup-badge">MOCK-UP · NOT REAL DATA</span>
                   </div>
                 </div>
 
@@ -534,7 +539,7 @@ export default function LandingPage() {
                   <div className="brief-section-block">
                     <div className="block-header">
                       <span className="block-num">01</span>
-                      <h4 className="block-title">What's New (Preceding 30 Days)</h4>
+                      <h4 className="block-title">What&rsquo;s New (Preceding 30 Days)</h4>
                     </div>
 
                     <div className="updates-list-stack">
@@ -562,7 +567,7 @@ export default function LandingPage() {
                     <div className="discussion-list-stack">
                       {profile.talkAbout.map((item, idx) => (
                         <div key={idx} className="discussion-item-card">
-                          <span className="discussion-angle">"{item.angle}"</span>
+                          <span className="discussion-angle">&ldquo;{item.angle}&rdquo;</span>
                           <p className="discussion-rationale">{item.rationale}</p>
                         </div>
                       ))}
@@ -581,7 +586,7 @@ export default function LandingPage() {
                         <div key={idx} className="question-item-card">
                           <div className="question-text-wrap">
                             <span className="question-cat-pill">{q.category}</span>
-                            <p className="question-quote">"{q.question}"</p>
+                            <p className="question-quote">&ldquo;{q.question}&rdquo;</p>
                           </div>
                           <button
                             type="button"
@@ -600,7 +605,7 @@ export default function LandingPage() {
                 {/* Document Archival Footer */}
                 <footer className="tactile-sheet-footer">
                   <div className="footer-seal-line">
-                    <span className="seal-text">ILLUSTRATIVE EXECUTIVE BRIEF // COMPILED FROM 30-DAY PUBLIC SOURCES</span>
+                    <span className="seal-text">ILLUSTRATIVE MOCK-UP // EXAMPLE DATA, NOT A REAL BRIEF</span>
                     <span className="seal-ready">PRINT-READY 1-PAGE SUMMARY</span>
                   </div>
                 </footer>

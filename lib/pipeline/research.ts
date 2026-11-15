@@ -34,6 +34,8 @@ const SourcePriority: Record<SourceType, number> = {
   aggregator: 2,
 };
 const MAX_BLOCKLISTED_SOURCES = 1;
+const MAX_SOURCES = 12;
+const RESERVED_THESIS_SOURCES = 2;
 
 function normalizeUrl(value: string): string {
   const url = new URL(value);
@@ -159,14 +161,34 @@ export async function research(
   });
 
   let blocklistedCount = 0;
-  const sources = orderedSources
-    .filter((source) => {
-      if (!isBlocklistedDomain(source.domain)) return true;
-      if (blocklistedCount >= MAX_BLOCKLISTED_SOURCES) return false;
-      blocklistedCount += 1;
-      return true;
-    })
-    .slice(0, 12)
+  const eligibleSources = orderedSources.filter((source) => {
+    if (!isBlocklistedDomain(source.domain)) return true;
+    if (blocklistedCount >= MAX_BLOCKLISTED_SOURCES) return false;
+    blocklistedCount += 1;
+    return true;
+  });
+
+  // Thesis pages on the investor's own site are usually older than the news,
+  // so newest-first ranking pushed them out of the top 12 and "Fit" had no
+  // evidence. Reserve a few slots for them; the rest are filled as before.
+  const thesisUrls = urlsByCategory.get("thesis_statements") ?? new Set<string>();
+  const selectedUrls = new Set(
+    eligibleSources
+      .filter(
+        (source) =>
+          thesisUrls.has(source.url) &&
+          matchesDomain(source.domain, selectedCandidate.officialDomain),
+      )
+      .slice(0, RESERVED_THESIS_SOURCES)
+      .map((source) => source.url),
+  );
+  for (const source of eligibleSources) {
+    if (selectedUrls.size >= MAX_SOURCES) break;
+    selectedUrls.add(source.url);
+  }
+
+  const sources = eligibleSources
+    .filter((source) => selectedUrls.has(source.url))
     .map((source, index) => ({
       ...source,
       id: `S${index + 1}`,
